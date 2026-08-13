@@ -1,0 +1,151 @@
+================================================================================
+Franka-Sim SAC 运行指令
+================================================================================
+
+# 每次开终端先做：
+cd /root/gpufree-data/RLinf
+source .venv/bin/activate
+export MUJOCO_GL=egl
+export PYOPENGL_PLATFORM=egl
+ray start --head --num-gpus=1
+
+
+--------------------------------------------------------------------------------
+训练
+--------------------------------------------------------------------------------
+
+python examples/embodiment/train_async.py \
+  --config-path /root/gpufree-data/RLinf/examples/embodiment/config/ \
+  --config-name frankasim_sac_cnn_async \
+  actor.model.model_path=/root/gpufree-data/RLinf/assets/RLinf-ResNet10-pretrained \
+  rollout.model.model_path=/root/gpufree-data/RLinf/assets/RLinf-ResNet10-pretrained
+
+# TensorBoard: tensorboard --logdir logs --port 6006
+
+
+--------------------------------------------------------------------------------
+冒烟测试（2 epoch 快速验证）
+--------------------------------------------------------------------------------
+
+python examples/embodiment/train_async.py \
+  --config-path /root/gpufree-data/RLinf/examples/embodiment/config/ \
+  --config-name frankasim_sac_cnn_async \
+  actor.model.model_path=/root/gpufree-data/RLinf/assets/RLinf-ResNet10-pretrained \
+  rollout.model.model_path=/root/gpufree-data/RLinf/assets/RLinf-ResNet10-pretrained \
+  runner.max_epochs=2 runner.val_check_interval=10000 \
+  runner.logger.log_path=/tmp/smoke \
+  rollout.enable_torch_compile=False rollout.enable_cuda_graph=False \
+  actor.compile_model=False
+
+
+--------------------------------------------------------------------------------
+RLPD（加示教缓冲区）
+--------------------------------------------------------------------------------
+
+# 在训练命令后追加：
+  algorithm.demo_buffer.enable_cache=true \
+  algorithm.demo_buffer.cache_size=5000 \
+  algorithm.demo_buffer.min_buffer_size=1 \
+  algorithm.demo_buffer.sample_window_size=5000 \
+  algorithm.demo_buffer.load_path=/absolute/path/to/frankasim_demos \
+  algorithm.demo_buffer.auto_save=false
+
+
+--------------------------------------------------------------------------------
+MuJoCo 可视化
+--------------------------------------------------------------------------------
+
+# 1) 训练时录视频（eval 阶段）：
+#    在训练命令后追加：
+  env.eval.video_cfg.save_video=True \
+  env.eval.video_cfg.video_base_dir=/root/gpufree-data/RLinf/logs/video/eval
+#    视频生成在 logs/video/eval/
+
+# 2) 训练时录视频（train 阶段）：
+  env.train.video_cfg.save_video=True \
+  env.train.video_cfg.video_base_dir=/root/gpufree-data/RLinf/logs/video/train
+
+# 3) 独立查看 MuJoCo 场景（需 X11 转发，本地终端跑）：
+python -c "
+import mujoco, mujoco.viewer, time
+m = mujoco.MjModel.from_xml_path('/root/gpufree-data/RLinf/assets/frankasim_xmls/arena.xml')
+d = mujoco.MjData(m)
+mujoco.mj_forward(m, d)
+with mujoco.viewer.launch_passive(m, d) as v:
+    while v.is_running():
+        v.sync()
+        time.sleep(0.01)
+"
+
+# 4) 离屏渲染录 mp4（无 X11，服务器上跑）：
+python -c "
+import mujoco, numpy as np, imageio
+m = mujoco.MjModel.from_xml_path('/root/gpufree-data/RLinf/assets/frankasim_xmls/arena.xml')
+d = mujoco.MjData(m)
+r = mujoco.Renderer(m, 480, 640)
+frames = []
+for i in range(200):
+    mujoco.mj_step(m, d)
+    r.update_scene(d)
+    frames.append(r.render())
+imageio.mimsave('/tmp/arena.mp4', frames, fps=30)
+print('saved /tmp/arena.mp4')
+"
+
+
+--------------------------------------------------------------------------------
+资产位置（都在 /root/gpufree-data/RLinf/assets/）
+--------------------------------------------------------------------------------
+
+assets/
+  RLinf-ResNet10-pretrained/
+    resnet10_pretrained.pt              ResNet10 预训练权重（21MB）
+
+  frankasim_xmls/                       MuJoCo 场景 XML（可直接改，软链生效）
+    arena.xml                           主场景（桌面+cube）
+    panda.xml                           Franka Panda 机器人
+    franka_emika_panda/                 Panda mesh 资产
+    robotiq_2f85/                       Robotiq 2F-85 夹爪
+
+# 改 XML 直接改 assets/frankasim_xmls/ 里的即可，
+# .venv/serl/.../envs/xmls 是指向它的软链接，改了立即生效。
+
+
+--------------------------------------------------------------------------------
+代码位置（改任务/奖励/控制器在这里）
+--------------------------------------------------------------------------------
+
+franka_sim 环境：
+  .venv/serl/franka_sim/franka_sim/
+    envs/panda_pick_gym_env.py          PickCube 环境（奖励/动作在这里改）
+    controllers/opspace.py              操作空间控制器（已修 mujoco 3.x 兼容）
+    mujoco_gym_env.py                   MuJoCo gym 基类
+
+RLinf 配置：
+  examples/embodiment/config/frankasim_sac_cnn_async.yaml        SAC 主配置
+  examples/embodiment/config/env/frankasim_pickcube_vision.yaml  环境配置
+  examples/embodiment/config/model/cnn_policy.yaml               模型配置
+
+
+--------------------------------------------------------------------------------
+停止 / 清理
+--------------------------------------------------------------------------------
+
+ray stop                          # 停 Ray
+rm -rf /tmp/smoke                 # 删冒烟日志
+rm -rf logs/                      # 删训练日志（谨慎）
+
+# 不要删：.venv/serl/、assets/、opspace.py 补丁
+
+
+--------------------------------------------------------------------------------
+排错
+--------------------------------------------------------------------------------
+
+# mj_fullM 签名错误 → opspace.py 补丁丢了，检查第 152 行有 try/except
+# config directory not found → --config-path 用绝对路径
+# EGL 渲染失败 → export MUJOCO_GL=egl
+# Ray 连不上 → ray start --head --num-gpus=1
+# 权重找不到 → override model_path 指向 assets/RLinf-ResNet10-pretrained
+
+================================================================================
