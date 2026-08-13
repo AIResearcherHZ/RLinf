@@ -21,7 +21,7 @@ import numpy as np
 
 
 class SemiTaksT1PickCubeEnv(gym.Env):
-    """Semi-Taks-T1 right-arm PickCube task with a fixed waist and left arm."""
+    """Semi-Taks-T1 PickCube task using Franka-style operational-space control."""
 
     metadata = {"render_modes": ["rgb_array"], "render_fps": 30}
 
@@ -41,6 +41,10 @@ class SemiTaksT1PickCubeEnv(gym.Env):
         render_mode: Optional[str] = None,
         model_path: Optional[str] = None,
         control_substeps: int = 20,
+        position_gain: float = 150.0,
+        orientation_gain: float = 25.0,
+        damping_ratio: float = 1.0,
+        nullspace_gain: float = 10.0,
     ) -> None:
         """Initialize the MuJoCo task."""
         super().__init__()
@@ -52,6 +56,10 @@ class SemiTaksT1PickCubeEnv(gym.Env):
         self.image_obs = image_obs
         self.render_mode = render_mode
         self.control_substeps = control_substeps
+        self.position_gain = position_gain
+        self.orientation_gain = orientation_gain
+        self.damping_ratio = damping_ratio
+        self.nullspace_gain = nullspace_gain
         self._renderer: Optional[mujoco.Renderer] = None
         self._rng = np.random.default_rng()
 
@@ -63,6 +71,9 @@ class SemiTaksT1PickCubeEnv(gym.Env):
         self._arm_actuator_ids = np.array(
             [self.model.actuator(name).id for name in self._RIGHT_ARM_JOINTS]
         )
+        self._arm_force_limits = np.abs(
+            self.model.actuator_forcerange[self._arm_actuator_ids]
+        )[:, 1]
         self._gripper_actuator_id = self.model.actuator("right_gripper").id
         self._gripper_joint_id = self.model.joint("dm_right_gripper_drive_joint").id
         self._gripper_qpos_adr = self.model.jnt_qposadr[self._gripper_joint_id]
@@ -70,6 +81,12 @@ class SemiTaksT1PickCubeEnv(gym.Env):
         self._block_joint_id = self.model.joint("block_joint").id
         self._block_qpos_adr = self.model.jnt_qposadr[self._block_joint_id]
         self._block_body_id = self.model.body("block").id
+        self._mass_matrix = np.zeros((self.model.nv, self.model.nv))
+        self._jacobian_position = np.zeros((3, self.model.nv))
+        self._jacobian_rotation = np.zeros((3, self.model.nv))
+        self._target_position = np.zeros(3)
+        self._target_orientation = np.eye(3)
+        self._nullspace_qpos = np.zeros(len(self._arm_joint_ids))
 
         self.action_space = gym.spaces.Box(-1.0, 1.0, shape=(4,), dtype=np.float32)
         state_space = gym.spaces.Box(-np.inf, np.inf, shape=(7,), dtype=np.float32)
@@ -102,14 +119,19 @@ class SemiTaksT1PickCubeEnv(gym.Env):
             [
                 self._rng.uniform(0.43, 0.50),
                 self._rng.uniform(-0.24, -0.10),
-                0.535,
+                0.685,
             ]
         )
         self.data.qpos[block_qpos + 3 : block_qpos + 7] = (1.0, 0.0, 0.0, 0.0)
         self.data.ctrl[:] = 0.0
-        self.data.ctrl[self._arm_actuator_ids] = self.data.qpos[self._arm_qpos_adr]
-        self.data.ctrl[self._gripper_actuator_id] = 0.0
         mujoco.mj_forward(self.model, self.data)
+        self._target_position[:] = self.data.site_xpos[self._ee_site_id]
+        self._target_orientation[:] = self.data.site_xmat[self._ee_site_id].reshape(
+            3, 3
+        )
+        self._nullspace_qpos[:] = self.data.qpos[self._arm_qpos_adr]
+        self.data.ctrl[self._arm_actuator_ids] = self._operational_space_torques()
+        self.data.ctrl[self._gripper_actuator_id] = 0.0
         return self._observation(), self._info()
 
     def step(
@@ -117,18 +139,22 @@ class SemiTaksT1PickCubeEnv(gym.Env):
     ) -> tuple[dict[str, Any], float, bool, bool, dict[str, Any]]:
         """Apply Cartesian translation and gripper commands to the right arm."""
         action = np.clip(np.asarray(action, dtype=np.float64), -1.0, 1.0)
-        target_position = self.data.site_xpos[self._ee_site_id] + action[:3] * 0.025
-        q_target = self._solve_position_ik(target_position)
-        self.data.ctrl[self._arm_actuator_ids] = q_target
+        self._target_position += action[:3] * 0.025
+        self._target_position[:] = np.clip(
+            self._target_position,
+            np.array([0.25, -0.40, 0.69]),
+            np.array([0.65, 0.05, 0.95]),
+        )
         self.data.ctrl[self._gripper_actuator_id] = 0.9 if action[3] > 0 else 0.0
         for _ in range(self.control_substeps):
+            self.data.ctrl[self._arm_actuator_ids] = self._operational_space_torques()
             mujoco.mj_step(self.model, self.data)
 
         info = self._info()
         ee_pos = self.data.site_xpos[self._ee_site_id]
         block_pos = self.data.xpos[self._block_body_id]
         distance = float(np.linalg.norm(ee_pos - block_pos))
-        lift = max(0.0, float(block_pos[2] - 0.535))
+        lift = max(0.0, float(block_pos[2] - 0.685))
         reward = float(1.0 - np.tanh(8.0 * distance) + 5.0 * lift)
         if info["success"]:
             reward += 10.0
@@ -144,30 +170,60 @@ class SemiTaksT1PickCubeEnv(gym.Env):
             self._renderer.close()
             self._renderer = None
 
-    def _solve_position_ik(self, target_position: np.ndarray) -> np.ndarray:
-        q = self.data.qpos[self._arm_qpos_adr].copy()
-        work_data = mujoco.MjData(self.model)
-        work_data.qpos[:] = self.data.qpos
-        for _ in range(12):
-            work_data.qpos[self._arm_qpos_adr] = q
-            mujoco.mj_forward(self.model, work_data)
-            error = target_position - work_data.site_xpos[self._ee_site_id]
-            if np.linalg.norm(error) < 1e-4:
-                break
-            jacobian = np.zeros((3, self.model.nv))
-            mujoco.mj_jacSite(self.model, work_data, jacobian, None, self._ee_site_id)
-            arm_jacobian = jacobian[:, self._arm_dof_adr]
-            damping = 1e-4 * np.eye(3)
-            delta = arm_jacobian.T @ np.linalg.solve(
-                arm_jacobian @ arm_jacobian.T + damping, error
+    def _operational_space_torques(self) -> np.ndarray:
+        mujoco.mj_jacSite(
+            self.model,
+            self.data,
+            self._jacobian_position,
+            self._jacobian_rotation,
+            self._ee_site_id,
+        )
+        jacobian = np.vstack(
+            (
+                self._jacobian_position[:, self._arm_dof_adr],
+                self._jacobian_rotation[:, self._arm_dof_adr],
             )
-            q += np.clip(delta, -0.08, 0.08)
-            q = np.clip(
-                q,
-                self.model.jnt_range[self._arm_joint_ids, 0],
-                self.model.jnt_range[self._arm_joint_ids, 1],
-            )
-        return q
+        )
+        velocity = jacobian @ self.data.qvel[self._arm_dof_adr]
+        position_error = self._target_position - self.data.site_xpos[self._ee_site_id]
+        current_orientation = self.data.site_xmat[self._ee_site_id].reshape(3, 3)
+        rotation_error_matrix = self._target_orientation @ current_orientation.T
+        orientation_error = 0.5 * np.array(
+            [
+                rotation_error_matrix[2, 1] - rotation_error_matrix[1, 2],
+                rotation_error_matrix[0, 2] - rotation_error_matrix[2, 0],
+                rotation_error_matrix[1, 0] - rotation_error_matrix[0, 1],
+            ]
+        )
+        stiffness = np.array([self.position_gain] * 3 + [self.orientation_gain] * 3)
+        damping = 2.0 * self.damping_ratio * np.sqrt(stiffness)
+        desired_wrench = (
+            stiffness * np.concatenate((position_error, orientation_error))
+            - damping * velocity
+        )
+
+        try:
+            mujoco.mj_fullM(self.model, self.data, self._mass_matrix)
+        except TypeError:
+            mujoco.mj_fullM(self.model, self._mass_matrix, self.data.qM)
+        arm_mass = self._mass_matrix[np.ix_(self._arm_dof_adr, self._arm_dof_adr)]
+        mass_inverse = np.linalg.inv(arm_mass)
+        task_inertia_inverse = jacobian @ mass_inverse @ jacobian.T
+        task_inertia = np.linalg.pinv(task_inertia_inverse, rcond=1e-4)
+        task_torque = jacobian.T @ task_inertia @ desired_wrench
+
+        dynamically_consistent_inverse = mass_inverse @ jacobian.T @ task_inertia
+        nullspace_projector = np.eye(len(self._arm_dof_adr)) - (
+            jacobian.T @ dynamically_consistent_inverse.T
+        )
+        q_error = self._nullspace_qpos - self.data.qpos[self._arm_qpos_adr]
+        nullspace_torque = (
+            self.nullspace_gain * q_error
+            - 2.0 * np.sqrt(self.nullspace_gain) * self.data.qvel[self._arm_dof_adr]
+        )
+        bias_torque = self.data.qfrc_bias[self._arm_dof_adr]
+        torque = task_torque + nullspace_projector @ nullspace_torque + bias_torque
+        return np.clip(torque, -self._arm_force_limits, self._arm_force_limits)
 
     def _observation(self) -> dict[str, Any]:
         ee_pos = self.data.site_xpos[self._ee_site_id].astype(np.float32).copy()
@@ -193,4 +249,4 @@ class SemiTaksT1PickCubeEnv(gym.Env):
 
     def _info(self) -> dict[str, Any]:
         block_height = float(self.data.xpos[self._block_body_id, 2])
-        return {"success": block_height > 0.62, "fail": block_height < 0.48}
+        return {"success": block_height > 0.77, "fail": block_height < 0.63}

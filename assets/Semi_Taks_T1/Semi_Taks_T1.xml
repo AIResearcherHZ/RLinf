@@ -347,13 +347,13 @@
     <position name="left_wrist_yaw_joint" joint="left_wrist_yaw_joint" ctrlrange="-0.9 0.9" kp="6.632374157532048" kv="0.42223005264246816" forcerange="-7 7" />
     <position name="left_wrist_pitch_joint" joint="left_wrist_pitch_joint" ctrlrange="-0.9 0.9" kp="6.632374157532048" kv="0.42223005264246816" forcerange="-7 7" />
     <!-- Right Arm -->
-    <position name="right_shoulder_pitch_joint" joint="right_shoulder_pitch_joint" ctrlrange="-3.1415 1.0472" kp="112.43453333720996" kv="7.157804701938984" forcerange="-27 27" />
-    <position name="right_shoulder_roll_joint" joint="right_shoulder_roll_joint" ctrlrange="-2.2515 1.5882" kp="112.43453333720996" kv="7.157804701938984" forcerange="-27 27" />
-    <position name="right_shoulder_yaw_joint" joint="right_shoulder_yaw_joint" ctrlrange="-2.618 2.618" kp="112.43453333720996" kv="7.157804701938984" forcerange="-27 27" />
-    <position name="right_elbow_joint" joint="right_elbow_joint" ctrlrange="-0.7 1.35" kp="112.43453333720996" kv="7.157804701938984" forcerange="-27 27" />
-    <position name="right_wrist_roll_joint" joint="right_wrist_roll_joint" ctrlrange="-2.67 2.67" kp="6.632374157532048" kv="0.42223005264246816" forcerange="-7 7" />
-    <position name="right_wrist_yaw_joint" joint="right_wrist_yaw_joint" ctrlrange="-0.9 0.9" kp="6.632374157532048" kv="0.42223005264246816" forcerange="-7 7" />
-    <position name="right_wrist_pitch_joint" joint="right_wrist_pitch_joint" ctrlrange="-0.9 0.9" kp="6.632374157532048" kv="0.42223005264246816" forcerange="-7 7" />
+    <motor name="right_shoulder_pitch_joint" joint="right_shoulder_pitch_joint" ctrlrange="-27 27" forcerange="-27 27" />
+    <motor name="right_shoulder_roll_joint" joint="right_shoulder_roll_joint" ctrlrange="-27 27" forcerange="-27 27" />
+    <motor name="right_shoulder_yaw_joint" joint="right_shoulder_yaw_joint" ctrlrange="-27 27" forcerange="-27 27" />
+    <motor name="right_elbow_joint" joint="right_elbow_joint" ctrlrange="-27 27" forcerange="-27 27" />
+    <motor name="right_wrist_roll_joint" joint="right_wrist_roll_joint" ctrlrange="-7 7" forcerange="-7 7" />
+    <motor name="right_wrist_yaw_joint" joint="right_wrist_yaw_joint" ctrlrange="-7 7" forcerange="-7 7" />
+    <motor name="right_wrist_pitch_joint" joint="right_wrist_pitch_joint" ctrlrange="-7 7" forcerange="-7 7" />
     <!-- Neck -->
     <position name="neck_yaw_joint" joint="neck_yaw_joint" ctrlrange="-1.57 1.57" kp="1.234174291147422" kv="0.07856997562921929" forcerange="-3 3" />
     <position name="neck_roll_joint" joint="neck_roll_joint" ctrlrange="-0.873 0.873" kp="1.2341742911474222" kv="0.07856997562921929" forcerange="-3 3" />

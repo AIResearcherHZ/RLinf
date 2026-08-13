@@ -1,127 +1,178 @@
 ================================================================================
-FrankaSim / Semi-Taks-T1：SAC 前训练 -> RLPD 后训练
+RLinf Franka-Sim Benchmark
 ================================================================================
 
-通用环境
+说明
 --------------------------------------------------------------------------------
 
-cd /home/xhz/RLinf
+Franka-Sim 是基于 RLinf SERL fork 的轻量 Franka Panda 仿真环境。RLinf 官方提供两条训练配方：状态观测下的 MLP + PPO，以及 RGB 观测下的 CNN + 异步 SAC。
 
-# 首次安装
-bash requirements/install.sh embodied --model mlp --env frankasim
+概览：MLP / CNN；PPO / SAC；PickCube 状态 / 视觉；1 节点、1 张 GPU。
+训练后主要观察：env/success_once。
 
-source .venv/bin/activate
-export REPO_PATH=/home/xhz/RLinf
-export EMBODIED_PATH=$REPO_PATH/examples/embodiment
-export MUJOCO_GL=egl
-export PYOPENGL_PLATFORM=egl
-export RESNET_PATH=$REPO_PATH/assets/RLinf-ResNet10-pretrained
+任务与接口
+--------------------------------------------------------------------------------
 
-ray start --head --num-gpus=1
+- PandaPickCube-v0：MLP + PPO 的状态观测 PickCube 任务。
+- PandaPickCubeVision-v0：CNN + 异步 SAC 的 RGB 观测 PickCube 任务。
+- 观测：状态任务使用本体状态与目标位置；视觉任务使用 RGB 图像与状态。
+- 动作：4 维连续动作，3 维末端位置增量 + 夹爪控制。
+- 奖励：稠密任务进度奖励。
+- Prompt：状态 MLP 配方不使用；视觉策略使用 env wrapper 提供的任务条件观测。
+
+安装
+--------------------------------------------------------------------------------
+
+先克隆仓库：
+
+  git clone https://github.com/RLinf/RLinf.git
+  cd RLinf
+
+方式 1：Docker
+
+  docker run -it --rm --gpus all \
+    --shm-size 32g \
+    --network host \
+    --name rlinf \
+    -v .:/workspace/RLinf \
+    rlinf/rlinf:agentic-rlinf0.4-frankasim
+
+进入容器后：
+
+  source switch_env openvla
+
+方式 2：本地环境
+
+  bash requirements/install.sh embodied --model openvla --env frankasim
+  source .venv/bin/activate
+
+中国大陆用户可按官方页面添加镜像源或克隆镜像。
+
+下载模型
+--------------------------------------------------------------------------------
+
+MLP + PPO 不需要下载 ResNet。CNN + SAC 需要 RLinf-ResNet10-pretrained：
+
+  cd /path/to/save/model
+  git lfs install
+  git clone https://huggingface.co/RLinf/RLinf-ResNet10-pretrained
+
+或：
+
+  pip install huggingface-hub
+  hf download RLinf/RLinf-ResNet10-pretrained \
+    --local-dir RLinf-ResNet10-pretrained
+
+在 examples/embodiment/config/frankasim_sac_cnn_async.yaml 中，rollout.model.model_path 和 actor.model.model_path 必须指向同一个检查点目录。
+
+训练配方
+--------------------------------------------------------------------------------
+
+MLP + PPO
+
+- 配置：examples/embodiment/config/frankasim_ppo_mlp.yaml
+- 入口：examples/embodiment/run_embodiment.sh
+- 命令：
+
+  bash examples/embodiment/run_embodiment.sh frankasim_ppo_mlp
+
+CNN + SAC（异步）
+
+- 配置：examples/embodiment/config/frankasim_sac_cnn_async.yaml
+- 入口：examples/embodiment/run_async.sh
+- 命令：
+
+  bash examples/embodiment/run_async.sh frankasim_sac_cnn_async
+
+两条配方都会启动 embodied 训练入口，创建 actor、rollout 和 Franka-Sim env worker，进行 rollout、任务奖励计算和策略更新。
+两个参考配置默认都运行在 GPU 0。如需调整，修改 cluster.component_placement、env.train.total_num_envs 和 batch size。
+
+可视化与结果
+--------------------------------------------------------------------------------
+
+在 RLinf 仓库根目录启动 TensorBoard：
+
+  tensorboard --logdir ../results --port 6006
+
+关键指标是 env/success_once。如需保存 rollout 视频，在配置中启用：
+
+  env:
+    eval:
+      video_cfg:
+        save_video: True
+        video_base_dir: ${runner.logger.log_path}/video/eval
+
+CNN + 异步 SAC 的官方记录是在仿真环境中约一小时内学会稳定抓取策略。
 
 
-一、FrankaSim
+RLinf 项目内适配：Semi-Taks-T1
 ================================================================================
 
-模型：assets/frankasim_xmls/arena.xml
-
-SAC 前训练：
-
-python examples/embodiment/train_async.py \
-  --config-path $EMBODIED_PATH/config \
-  --config-name frankasim_sac_cnn_async \
-  actor.model.model_path=$RESNET_PATH \
-  rollout.model.model_path=$RESNET_PATH
-
-RLPD 后训练，在上面命令末尾追加：
-
-  algorithm.demo_buffer.enable_cache=true \
-  algorithm.demo_buffer.cache_size=5000 \
-  algorithm.demo_buffer.min_buffer_size=1 \
-  algorithm.demo_buffer.sample_window_size=5000 \
-  algorithm.demo_buffer.load_path=/absolute/path/to/frankasim_demos \
-  algorithm.demo_buffer.auto_save=false
-
-FrankaSim 视频，在训练命令末尾追加：
-
-  env.eval.video_cfg.save_video=True \
-  env.eval.video_cfg.video_base_dir=$REPO_PATH/logs/frankasim_video/eval
-
-TensorBoard：tensorboard --logdir $REPO_PATH/logs --port 6006
-
-
-二、Semi-Taks-T1
-================================================================================
-
-模型：assets/Semi_Taks_T1/pickcube.xml
-约束：腰部、左臂和左夹爪固定，只控制右臂和右夹爪。
-接口：4 维动作（右手 xyz 增量、夹爪开合），7 维状态，前视和腕部双相机。
-
-
-准备变量
+说明
 --------------------------------------------------------------------------------
 
-export T1_RESNET_PATH=$RESNET_PATH
-export T1_PRETRAIN_LOG=$REPO_PATH/logs/semi_taks_t1_pretrain
-export T1_PRETRAIN_BUFFER=$T1_PRETRAIN_LOG/replay_buffer
-export T1_RLPD_LOG=$REPO_PATH/logs/semi_taks_t1_rlpd
+Semi-Taks-T1 是 RLinf 项目内的自定义 MuJoCo PickCube 环境，目标是与官方 Franka-Sim 页面保持同样的配方、入口和结果观测，只更换机器人本体和资产。
 
-训练前验证
+当前已实现：CNN + 异步 SAC。当前未实现完整对齐：MLP + PPO（缺少 T1 状态配方）。
+
+环境：SemiTaksT1PickCubeVision-v0
+配方：examples/embodiment/config/semi_taks_t1_sac_cnn_async.yaml
+资产：assets/Semi_Taks_T1/pickcube.xml
+验证：tests/unit_tests/envs/test_semi_taks_t1_pickcube.py
+
+任务与接口
 --------------------------------------------------------------------------------
 
-pytest -q tests/unit_tests/envs/test_semi_taks_t1_pickcube.py
+- 机器人：仅控制右臂和右夹爪；腰部、左臂和左夹爪通过约束锁定。
+- 观测：7 维 state + front 全局视图 + wrist 腕部视图，每路图像 128x128 RGB。
+- 动作：4 维连续动作，xyz 末端位置增量 + 夹爪控制。
+- 控制：操作空间力矩，20 个 MuJoCo control substeps。
+- 成功：方块高度超过 0.77；失败：方块高度低于 0.63；奖励为距离项 + 举升项，成功额外10。
 
-python -c "import gym, rlinf.envs.frankasim; e=gym.make('SemiTaksT1PickCubeVision-v0', image_obs=False); o,_=e.reset(seed=0); print(o['states'].shape, e.step([0,0,0,-1])[1]); e.close()"
-
-
-SAC 前训练
+模型与算法
 --------------------------------------------------------------------------------
 
-python examples/embodiment/train_async.py \
-  --config-path $EMBODIED_PATH/config \
-  --config-name semi_taks_t1_sac_cnn_async
+- 算法：异步 SAC，adv_type/loss_type 均为 embodied_sac。
+- 模型：CNN policy，actor 和 rollout 共用同一 T1_RESNET_PATH。
+- 输入参数：state_dim=7，action_dim=4，image_num=2，num_q_heads=10。
+- 默认：1 节点 / GPU 0；训练 1 个环境；评估 1 个环境。
+- replay buffer：内存缓存20000，最小开始缓冲区5条，默认自动保存。
 
-输出：
-  checkpoint：$T1_PRETRAIN_LOG/checkpoints/global_step_<N>/
-  buffer：$T1_PRETRAIN_BUFFER/rank_0/
-  日志：tensorboard --logdir $T1_PRETRAIN_LOG --port 6006
-
-
-RLPD 后训练
+环境变量
 --------------------------------------------------------------------------------
 
-export T1_PRETRAIN_CKPT=$T1_PRETRAIN_LOG/checkpoints/global_step_<N>
-export T1_DEMO_BUFFER=$T1_PRETRAIN_BUFFER/rank_0
+  export T1_RESNET_PATH=$REPO_PATH/assets/RLinf-ResNet10-pretrained
+  export T1_PRETRAIN_LOG=$REPO_PATH/logs/semi_taks_t1_pretrain
+  export T1_PRETRAIN_BUFFER=$T1_PRETRAIN_LOG/replay_buffer
+  export T1_PRETRAIN_CKPT=$T1_PRETRAIN_LOG/checkpoints/global_step_<N>
 
-test -d "$T1_PRETRAIN_CKPT/actor"
-test -f "$T1_DEMO_BUFFER/metadata.json"
-test -f "$T1_DEMO_BUFFER/trajectory_index.json"
-
-python examples/embodiment/train_async.py \
-  --config-path $EMBODIED_PATH/config \
-  --config-name semi_taks_t1_rlpd_cnn_async
-
-RLPD 从前训练 checkpoint 恢复，并按 50% 在线数据、50% 先验数据训练。
-使用人工示教时，将 T1_DEMO_BUFFER 改为对应的 rank_0 buffer 目录。
-
-
-评估和视频
+训练配方
 --------------------------------------------------------------------------------
 
-python examples/embodiment/train_async.py \
-  --config-path $EMBODIED_PATH/config \
-  --config-name semi_taks_t1_rlpd_cnn_async \
-  runner.only_eval=True \
-  runner.resume_dir=$T1_PRETRAIN_CKPT \
-  env.eval.video_cfg.save_video=True \
-  env.eval.video_cfg.video_base_dir=$REPO_PATH/logs/semi_taks_t1_video/eval
+MLP + PPO：当前没有 T1 状态环境配置和对应 PPO YAML，不能直接运行。完成对齐需新增状态 Gym ID、env config 和 MLP actor-critic config。
 
+CNN + SAC（异步）：
 
-停止：ray stop
+  python examples/embodiment/train_async.py \
+    --config-path $EMBODIED_PATH/config \
+    --config-name semi_taks_t1_sac_cnn_async
 
-排错：
-  - T1_PRETRAIN_CKPT 必须指向 global_step_<N>，不能指向 actor 子目录。
-  - T1_DEMO_BUFFER 必须指向含 metadata.json 的 rank_0 目录。
-  - RLPD 等待时，检查在线 replay 是否达到 min_buffer_size=5。
+或使用统一异步入口：
 
-================================================================================
+  bash examples/embodiment/run_async.sh semi_taks_t1_sac_cnn_async
+
+输出：checkpoint 保存在 $T1_PRETRAIN_LOG/checkpoints/global_step_<N>/，replay buffer 保存在 $T1_PRETRAIN_BUFFER/rank_0/。
+
+可视化与验证
+--------------------------------------------------------------------------------
+
+TensorBoard：
+
+  tensorboard --logdir $T1_PRETRAIN_LOG --port 6006
+
+开启评估视频：
+
+  env.eval.video_cfg.save_video=True
+  env.eval.video_cfg.video_base_dir=$T1_PRETRAIN_LOG/video/eval
+
+当前验证：模型锁定、右臂执行器、控制力矩测试通过；环境 reset/step 测试因当前 Python 缺少 gym 被跳过；目前没有独立 Semi-Taks-T1 E2E/CI recipe。

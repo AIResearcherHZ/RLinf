@@ -42,6 +42,23 @@ def test_model_locks_waist_and_left_arm() -> None:
     assert expected <= equality_names
     assert model.site("right_ee_site").id >= 0
     assert model.joint("block_joint").type == mujoco.mjtJoint.mjJNT_FREE
+    table_top = model.geom("table").pos[2] + model.geom("table").size[2]
+    block_bottom = model.body("block").pos[2] - model.geom("block").size[2]
+    assert table_top == pytest.approx(0.665)
+    assert block_bottom == pytest.approx(table_top)
+    right_arm_actuators = (
+        "right_shoulder_pitch_joint",
+        "right_shoulder_roll_joint",
+        "right_shoulder_yaw_joint",
+        "right_elbow_joint",
+        "right_wrist_roll_joint",
+        "right_wrist_yaw_joint",
+        "right_wrist_pitch_joint",
+    )
+    for actuator_name in right_arm_actuators:
+        actuator = model.actuator(actuator_name)
+        assert model.actuator_biastype[actuator.id] == mujoco.mjtBias.mjBIAS_NONE
+        assert model.actuator_gainprm[actuator.id, 0] == 1.0
     locked_joints = (
         "waist_yaw_joint",
         "waist_roll_joint",
@@ -72,6 +89,8 @@ def test_environment_reset_and_step() -> None:
 
     env = SemiTaksT1PickCubeEnv(image_obs=False, control_substeps=2)
     observation, info = env.reset(seed=7)
+    torque = env._operational_space_torques()
+    assert np.all(np.abs(torque) <= env._arm_force_limits)
     next_observation, reward, terminated, truncated, next_info = env.step(
         np.zeros(4, dtype=np.float32)
     )
