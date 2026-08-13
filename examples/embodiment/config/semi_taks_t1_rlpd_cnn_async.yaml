@@ -1,0 +1,18 @@
+defaults:
+  - semi_taks_t1_sac_cnn_async
+  - _self_
+
+runner:
+  logger:
+    log_path: ${oc.env:T1_RLPD_LOG,../results/semi_taks_t1_rlpd}
+    experiment_name: semi_taks_t1_rlpd
+  resume_dir: ${oc.env:T1_PRETRAIN_CKPT}
+
+algorithm:
+  demo_buffer:
+    enable_cache: true
+    cache_size: 20000
+    min_buffer_size: 1
+    sample_window_size: 20000
+    load_path: ${oc.env:T1_DEMO_BUFFER}
+    auto_save: false

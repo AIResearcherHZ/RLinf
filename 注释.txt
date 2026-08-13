@@ -1,48 +1,40 @@
 ================================================================================
-Franka-Sim SAC 运行指令
+FrankaSim / Semi-Taks-T1：SAC 前训练 -> RLPD 后训练
 ================================================================================
 
-# 每次开终端先做：
-cd /root/gpufree-data/RLinf
+通用环境
+--------------------------------------------------------------------------------
+
+cd /home/xhz/RLinf
+
+# 首次安装
+bash requirements/install.sh embodied --model mlp --env frankasim
+
 source .venv/bin/activate
+export REPO_PATH=/home/xhz/RLinf
+export EMBODIED_PATH=$REPO_PATH/examples/embodiment
 export MUJOCO_GL=egl
 export PYOPENGL_PLATFORM=egl
+export RESNET_PATH=$REPO_PATH/assets/RLinf-ResNet10-pretrained
+
 ray start --head --num-gpus=1
 
 
---------------------------------------------------------------------------------
-训练
---------------------------------------------------------------------------------
+一、FrankaSim
+================================================================================
+
+模型：assets/frankasim_xmls/arena.xml
+
+SAC 前训练：
 
 python examples/embodiment/train_async.py \
-  --config-path /root/gpufree-data/RLinf/examples/embodiment/config/ \
+  --config-path $EMBODIED_PATH/config \
   --config-name frankasim_sac_cnn_async \
-  actor.model.model_path=/root/gpufree-data/RLinf/assets/RLinf-ResNet10-pretrained \
-  rollout.model.model_path=/root/gpufree-data/RLinf/assets/RLinf-ResNet10-pretrained
+  actor.model.model_path=$RESNET_PATH \
+  rollout.model.model_path=$RESNET_PATH
 
-# TensorBoard: tensorboard --logdir logs --port 6006
+RLPD 后训练，在上面命令末尾追加：
 
-
---------------------------------------------------------------------------------
-冒烟测试（2 epoch 快速验证）
---------------------------------------------------------------------------------
-
-python examples/embodiment/train_async.py \
-  --config-path /root/gpufree-data/RLinf/examples/embodiment/config/ \
-  --config-name frankasim_sac_cnn_async \
-  actor.model.model_path=/root/gpufree-data/RLinf/assets/RLinf-ResNet10-pretrained \
-  rollout.model.model_path=/root/gpufree-data/RLinf/assets/RLinf-ResNet10-pretrained \
-  runner.max_epochs=2 runner.val_check_interval=10000 \
-  runner.logger.log_path=/tmp/smoke \
-  rollout.enable_torch_compile=False rollout.enable_cuda_graph=False \
-  actor.compile_model=False
-
-
---------------------------------------------------------------------------------
-RLPD（加示教缓冲区）
---------------------------------------------------------------------------------
-
-# 在训练命令后追加：
   algorithm.demo_buffer.enable_cache=true \
   algorithm.demo_buffer.cache_size=5000 \
   algorithm.demo_buffer.min_buffer_size=1 \
@@ -50,102 +42,86 @@ RLPD（加示教缓冲区）
   algorithm.demo_buffer.load_path=/absolute/path/to/frankasim_demos \
   algorithm.demo_buffer.auto_save=false
 
+FrankaSim 视频，在训练命令末尾追加：
 
---------------------------------------------------------------------------------
-MuJoCo 可视化
---------------------------------------------------------------------------------
-
-# 1) 训练时录视频（eval 阶段）：
-#    在训练命令后追加：
   env.eval.video_cfg.save_video=True \
-  env.eval.video_cfg.video_base_dir=/root/gpufree-data/RLinf/logs/video/eval
-#    视频生成在 logs/video/eval/
+  env.eval.video_cfg.video_base_dir=$REPO_PATH/logs/frankasim_video/eval
 
-# 2) 训练时录视频（train 阶段）：
-  env.train.video_cfg.save_video=True \
-  env.train.video_cfg.video_base_dir=/root/gpufree-data/RLinf/logs/video/train
-
-# 3) 独立查看 MuJoCo 场景（需 X11 转发，本地终端跑）：
-python -c "
-import mujoco, mujoco.viewer, time
-m = mujoco.MjModel.from_xml_path('/root/gpufree-data/RLinf/assets/frankasim_xmls/arena.xml')
-d = mujoco.MjData(m)
-mujoco.mj_forward(m, d)
-with mujoco.viewer.launch_passive(m, d) as v:
-    while v.is_running():
-        v.sync()
-        time.sleep(0.01)
-"
-
-# 4) 离屏渲染录 mp4（无 X11，服务器上跑）：
-python -c "
-import mujoco, numpy as np, imageio
-m = mujoco.MjModel.from_xml_path('/root/gpufree-data/RLinf/assets/frankasim_xmls/arena.xml')
-d = mujoco.MjData(m)
-r = mujoco.Renderer(m, 480, 640)
-frames = []
-for i in range(200):
-    mujoco.mj_step(m, d)
-    r.update_scene(d)
-    frames.append(r.render())
-imageio.mimsave('/tmp/arena.mp4', frames, fps=30)
-print('saved /tmp/arena.mp4')
-"
+TensorBoard：tensorboard --logdir $REPO_PATH/logs --port 6006
 
 
---------------------------------------------------------------------------------
-资产位置（都在 /root/gpufree-data/RLinf/assets/）
+二、Semi-Taks-T1
+================================================================================
+
+模型：assets/Semi_Taks_T1/pickcube.xml
+约束：腰部、左臂和左夹爪固定，只控制右臂和右夹爪。
+接口：4 维动作（右手 xyz 增量、夹爪开合），7 维状态，前视和腕部双相机。
+
+
+准备变量
 --------------------------------------------------------------------------------
 
-assets/
-  RLinf-ResNet10-pretrained/
-    resnet10_pretrained.pt              ResNet10 预训练权重（21MB）
+export T1_RESNET_PATH=$RESNET_PATH
+export T1_PRETRAIN_LOG=$REPO_PATH/logs/semi_taks_t1_pretrain
+export T1_PRETRAIN_BUFFER=$T1_PRETRAIN_LOG/replay_buffer
+export T1_RLPD_LOG=$REPO_PATH/logs/semi_taks_t1_rlpd
 
-  frankasim_xmls/                       MuJoCo 场景 XML（可直接改，软链生效）
-    arena.xml                           主场景（桌面+cube）
-    panda.xml                           Franka Panda 机器人
-    franka_emika_panda/                 Panda mesh 资产
-    robotiq_2f85/                       Robotiq 2F-85 夹爪
-
-# 改 XML 直接改 assets/frankasim_xmls/ 里的即可，
-# .venv/serl/.../envs/xmls 是指向它的软链接，改了立即生效。
-
-
---------------------------------------------------------------------------------
-代码位置（改任务/奖励/控制器在这里）
+训练前验证
 --------------------------------------------------------------------------------
 
-franka_sim 环境：
-  .venv/serl/franka_sim/franka_sim/
-    envs/panda_pick_gym_env.py          PickCube 环境（奖励/动作在这里改）
-    controllers/opspace.py              操作空间控制器（已修 mujoco 3.x 兼容）
-    mujoco_gym_env.py                   MuJoCo gym 基类
+pytest -q tests/unit_tests/envs/test_semi_taks_t1_pickcube.py
 
-RLinf 配置：
-  examples/embodiment/config/frankasim_sac_cnn_async.yaml        SAC 主配置
-  examples/embodiment/config/env/frankasim_pickcube_vision.yaml  环境配置
-  examples/embodiment/config/model/cnn_policy.yaml               模型配置
+python -c "import gym, rlinf.envs.frankasim; e=gym.make('SemiTaksT1PickCubeVision-v0', image_obs=False); o,_=e.reset(seed=0); print(o['states'].shape, e.step([0,0,0,-1])[1]); e.close()"
 
 
---------------------------------------------------------------------------------
-停止 / 清理
+SAC 前训练
 --------------------------------------------------------------------------------
 
-ray stop                          # 停 Ray
-rm -rf /tmp/smoke                 # 删冒烟日志
-rm -rf logs/                      # 删训练日志（谨慎）
+python examples/embodiment/train_async.py \
+  --config-path $EMBODIED_PATH/config \
+  --config-name semi_taks_t1_sac_cnn_async
 
-# 不要删：.venv/serl/、assets/、opspace.py 补丁
+输出：
+  checkpoint：$T1_PRETRAIN_LOG/checkpoints/global_step_<N>/
+  buffer：$T1_PRETRAIN_BUFFER/rank_0/
+  日志：tensorboard --logdir $T1_PRETRAIN_LOG --port 6006
 
 
+RLPD 后训练
 --------------------------------------------------------------------------------
-排错
+
+export T1_PRETRAIN_CKPT=$T1_PRETRAIN_LOG/checkpoints/global_step_<N>
+export T1_DEMO_BUFFER=$T1_PRETRAIN_BUFFER/rank_0
+
+test -d "$T1_PRETRAIN_CKPT/actor"
+test -f "$T1_DEMO_BUFFER/metadata.json"
+test -f "$T1_DEMO_BUFFER/trajectory_index.json"
+
+python examples/embodiment/train_async.py \
+  --config-path $EMBODIED_PATH/config \
+  --config-name semi_taks_t1_rlpd_cnn_async
+
+RLPD 从前训练 checkpoint 恢复，并按 50% 在线数据、50% 先验数据训练。
+使用人工示教时，将 T1_DEMO_BUFFER 改为对应的 rank_0 buffer 目录。
+
+
+评估和视频
 --------------------------------------------------------------------------------
 
-# mj_fullM 签名错误 → opspace.py 补丁丢了，检查第 152 行有 try/except
-# config directory not found → --config-path 用绝对路径
-# EGL 渲染失败 → export MUJOCO_GL=egl
-# Ray 连不上 → ray start --head --num-gpus=1
-# 权重找不到 → override model_path 指向 assets/RLinf-ResNet10-pretrained
+python examples/embodiment/train_async.py \
+  --config-path $EMBODIED_PATH/config \
+  --config-name semi_taks_t1_rlpd_cnn_async \
+  runner.only_eval=True \
+  runner.resume_dir=$T1_PRETRAIN_CKPT \
+  env.eval.video_cfg.save_video=True \
+  env.eval.video_cfg.video_base_dir=$REPO_PATH/logs/semi_taks_t1_video/eval
+
+
+停止：ray stop
+
+排错：
+  - T1_PRETRAIN_CKPT 必须指向 global_step_<N>，不能指向 actor 子目录。
+  - T1_DEMO_BUFFER 必须指向含 metadata.json 的 rank_0 目录。
+  - RLPD 等待时，检查在线 replay 是否达到 min_buffer_size=5。
 
 ================================================================================

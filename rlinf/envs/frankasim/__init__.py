@@ -12,8 +12,31 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from franka_sim.mujoco_gym_env import GymRenderingSpec, MujocoGymEnv
+import gym
 
 from .frankasim_env import FrankaSimEnv
+from .semi_taks_t1_pickcube_env import SemiTaksT1PickCubeEnv
 
-__all__ = ["FrankaSimEnv", "GymRenderingSpec", "MujocoGymEnv"]
+try:
+    gym.spec("SemiTaksT1PickCubeVision-v0")
+except gym.error.Error:
+    gym.register(
+        id="SemiTaksT1PickCubeVision-v0",
+        entry_point=(
+            "rlinf.envs.frankasim.semi_taks_t1_pickcube_env:SemiTaksT1PickCubeEnv"
+        ),
+        max_episode_steps=100,
+    )
+
+try:
+    from franka_sim.mujoco_gym_env import GymRenderingSpec, MujocoGymEnv
+except ImportError:
+    GymRenderingSpec = None
+    MujocoGymEnv = None
+
+__all__ = [
+    "FrankaSimEnv",
+    "GymRenderingSpec",
+    "MujocoGymEnv",
+    "SemiTaksT1PickCubeEnv",
+]
