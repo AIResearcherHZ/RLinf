@@ -1,77 +1,101 @@
 ================================================================================
-## Franka
+## RLinf 训练配方选型笔记
 ================================================================================
 
-训练配方
---------------------------------------------------------------------------------
-
-MLP + PPO
-
-- 配置：examples/embodiment/config/frankasim_ppo_mlp.yaml
-- 入口：examples/embodiment/run_embodiment.sh
-- 命令：
-
-  bash examples/embodiment/run_embodiment.sh frankasim_ppo_mlp
-
-CNN + SAC（异步）
-
-- 配置：examples/embodiment/config/frankasim_sac_cnn_async.yaml
-- 入口：examples/embodiment/run_async.sh
-- 命令：
-
-  bash examples/embodiment/run_async.sh frankasim_sac_cnn_async
-
-两条配方都会启动 embodied 训练入口，创建 actor、rollout 和 Franka-Sim env worker，进行 rollout、任务奖励计算和策略更新。
-两个参考配置默认都运行在 GPU 0。如需调整，修改 cluster.component_placement、env.train.total_num_envs 和 batch size。
-
-可视化与结果
---------------------------------------------------------------------------------
-
-在 RLinf 仓库根目录启动 TensorBoard：
-
-  tensorboard --logdir ../results --port 6006
-
-关键指标是 env/success_once。如需保存 rollout 视频，在配置中启用：
-
-  env:
-    eval:
-      video_cfg:
-        save_video: True
-        video_base_dir: ${runner.logger.log_path}/video/eval
-
-CNN + 异步 SAC 的官方记录是在仿真环境中约一小时内学会稳定抓取策略。
+约束：lerobot 数据为刚需。按方法大类组织。
 
 
 ================================================================================
-## Semi-Taks-T1
+## 一、在线 RL
 ================================================================================
 
-训练配方
---------------------------------------------------------------------------------
+### RLT（RL Token）
+页面：rst_source/examples/embodied/rlt.html
+配置（Semi-Taks-T1）：
+  Stage 1  examples/sft/config/semi_taks_t1_rlt_stage1_sft_openpi_pi05.yaml
+  Stage 2  examples/embodiment/config/semi_taks_t1_rlt_stage2_ac_mlp.yaml
+           examples/embodiment/config/semi_taks_t1_rlt_stage2_td3_mlp.yaml
+Stage 1  lerobot 演示 SFT π₀.₅ + RLT token transformer → 表示 z_rl
+Stage 2  冻结 feature model，只训 MLP actor-critic
+         状态={z_rl, proprio, ref_chunk}，off-policy + transition replay
+reward  Semi-Taks-T1 使用末端-方块距离、抬升高度和 success bonus 的 dense reward
+         chunk 内 gamma 折扣进 TD target
+关键    loss_type=rlt_ac/rlt_td3, rollout.collect_transitions=True
+         rollout.rlt_feature_model.model_path → Stage 1 checkpoint
 
-MLP + PPO：当前没有 T1 状态环境配置和对应 PPO YAML，不能直接运行。完成对齐需新增状态 Gym ID、env config 和 MLP actor-critic config。
 
-CNN + SAC（异步）：
+### Sim-Real Co-Training
+页面：rst_source/examples/embodied/co_training.html
+配置（Semi-Taks-T1）：examples/embodiment/config/semi_taks_t1_ppo_co_training_openpi_pi05.yaml
+流程  Semi-Taks-T1 MuJoCo 在线 PPO + 真机 lerobot SFT loss 联合
+      L_Total = L_RL + beta * L_SFT
+数据  50 条真机 LeRobot 轨迹（RLCo-Example-Real-Data），actor.sft_data_path
+关键  enable_sft_co_train=True, sft_loss_weight=0.2
 
-  python examples/embodiment/train_async.py \
-    --config-path $EMBODIED_PATH/config \
-    --config-name semi_taks_t1_sac_cnn_async
 
-或使用统一异步入口：
+================================================================================
+## 二、离线 RL
+================================================================================
 
-  bash examples/embodiment/run_async.sh semi_taks_t1_sac_cnn_async
+### STEAM
+页面：rst_source/examples/embodied/steam.html
+配置（Semi-Taks-T1）：
+  examples/offline_rl/config/semi_taks_t1_steam_value_model_sft.yaml
+  examples/offline_rl/config/semi_taks_t1_steam_compute_advantages.yaml
+  examples/offline_rl/config/semi_taks_t1_steam_cfg_rl_openpi.yaml
+三阶段  Value Model SFT (SigLIP+Gemma3) → worst-of-N advantage → CFG Training (π₀.₅)
+特点  value 信号=专家演示时序进度，无需 reward 标注
+模型  π₀.₅ + SigLIP-so400m + Gemma3-270M
 
-输出：checkpoint 保存在 $T1_PRETRAIN_LOG/checkpoints/global_step_<N>/，replay buffer 保存在 $T1_PRETRAIN_BUFFER/rank_0/。
 
-可视化与验证
---------------------------------------------------------------------------------
+### RECAP
+页面：rst_source/examples/embodied/recap.html
+配置（Semi-Taks-T1）：
+  examples/offline_rl/config/semi_taks_t1_recap_compute_returns.yaml
+  examples/offline_rl/config/semi_taks_t1_recap_value_model_sft.yaml
+  examples/offline_rl/config/semi_taks_t1_recap_compute_advantages.yaml
+  examples/offline_rl/config/semi_taks_t1_cfg_rl_openpi.yaml
+四阶段  Compute Returns → Value Model SFT → Compute Advantages → CFG Training
+特点  value 信号=回归 discounted return（需 reward），与 STEAM 共享 CFG 阶段
+数据  sft（全成功）+ rollout（含失败）两类 lerobot 数据集
 
-TensorBoard：
 
-  tensorboard --logdir $T1_PRETRAIN_LOG --port 6006
+================================================================================
+## 三、SFT（非 RL，作 RL 冷启动）
+================================================================================
 
-开启评估视频：
+  OpenPI SFT  examples/sft/config/semi_taks_t1_sft_openpi_pi05.yaml
+流程  SFT 拿 checkpoint → 再做 RL 微调
 
-  env.eval.video_cfg.save_video=True
-  env.eval.video_cfg.video_base_dir=$T1_PRETRAIN_LOG/video/eval
 
+================================================================================
+## 四、IL / DAgger
+================================================================================
+
+Online LeRobot DAgger（π₀，Semi-Taks-T1）
+  配置  semi_taks_t1_dagger_openpi_lerobot.yaml
+  流程  env 在线收集 LeRobot → RollingLeRobotDataset，expert relabel + beta schedule
+
+HG-DAgger 复用 Semi-Taks-T1 DAgger 配置，将 algorithm.dagger.only_save_expert=True 并接入 T1 专家策略。
+
+
+================================================================================
+## 五、可视化
+================================================================================
+
+tensorboard --logdir ./logs --port 6006
+指标  env/success_once, rollout/env_info/return, train/sft_loss, train/ppo_loss
+视频  需 obs_mode=rgb（state 模式不生成视频）
+      env.eval.video_cfg.save_video=True
+
+
+================================================================================
+## 六、决策树
+================================================================================
+
+lerobot 数据刚需？
+  ├─ 在线 + 轻量？      RLT
+  ├─ 在线 sim + 真机？  Sim-Real Co-Training
+  ├─ 纯离线无 reward？  STEAM
+  ├─ 纯离线有 reward？  RECAP
+  └─ IL 可接受？        DAgger / HG-DAgger

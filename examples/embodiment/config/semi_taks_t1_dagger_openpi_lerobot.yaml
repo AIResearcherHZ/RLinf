@@ -1,0 +1,142 @@
+defaults:
+  - env/semi_taks_t1_pickcube_openpi@env.train
+  - env/semi_taks_t1_pickcube_openpi@env.eval
+  - model/pi0@actor.model
+  - hybrid_engines/fsdp@actor.fsdp_config
+  - weight_syncer/bucket_syncer@weight_syncer
+  - override hydra/job_logging: stdout
+  - _self_
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null
+  searchpath:
+    - file://${oc.env:EMBODIED_PATH}/config/
+
+cluster:
+  num_nodes: 1
+  component_placement:
+    env,actor,rollout: 0
+
+runner:
+  task_type: embodied
+  logger:
+    log_path: ${oc.env:T1_DAGGER_LOG,../results/semi_taks_t1_dagger}
+    project_name: rlinf
+    experiment_name: semi_taks_t1_dagger_openpi_lerobot
+    logger_backends: [tensorboard]
+  max_epochs: 2000
+  max_steps: -1
+  only_eval: false
+  val_check_interval: 8
+  save_interval: 50
+  resume_dir: null
+  ckpt_path: null
+  expert_ckpt_path: null
+
+algorithm:
+  dagger:
+    init_beta: 1.0
+    beta_schedule: exponential
+    beta_decay: 0.995
+    only_save_expert: false
+    online_lerobot:
+      enabled: true
+      only_success: true
+      robot_type: semi_taks_t1
+      fps: 10
+      finalize_interval: 8
+      data_path: ${runner.logger.log_path}/lerobot
+      rolling_lerobot_window_size: 50000
+      enable_decoded_cache: true
+      decoded_cache_capacity: 25000
+      cache_ingest_mode: new_shards
+      cache_last_n_frames: 25000
+      cache_ingest_max_frames: null
+      lerobot_num_workers: 0
+  gamma: 0.99
+  update_epoch: 4
+  adv_type: gae
+  loss_type: embodied_dagger
+
+env:
+  group_name: EnvGroup
+  train:
+    rollout_epoch: 1
+    auto_reset: true
+    ignore_terminations: false
+    total_num_envs: 1
+  eval:
+    rollout_epoch: 5
+    total_num_envs: 1
+    auto_reset: true
+    ignore_terminations: false
+    group_size: 1
+    is_eval: true
+    video_cfg:
+      save_video: false
+      video_base_dir: ${runner.logger.log_path}/video/eval
+
+rollout:
+  group_name: RolloutGroup
+  backend: huggingface
+  recompute_logprobs: false
+  enable_offload: false
+  pipeline_stage_num: 1
+  collect_prev_infos: false
+  model:
+    model_path: ${oc.env:T1_STUDENT_CKPT}
+    precision: ${actor.model.precision}
+  expert_model:
+    model_path: ${oc.env:T1_EXPERT_CKPT}
+    precision: ${actor.model.precision}
+
+actor:
+  group_name: ActorGroup
+  training_backend: fsdp
+  micro_batch_size: 8
+  global_batch_size: 32
+  seed: 1234
+  enable_offload: false
+  model:
+    precision: null
+    model_path: ${oc.env:T1_STUDENT_CKPT}
+    action_dim: 4
+    num_action_chunks: 10
+    add_value_head: false
+    openpi:
+      config_name: pi0_semi_taks_t1
+      num_images_in_input: 2
+      train_expert_only: false
+      detach_critic_input: true
+      action_chunk: ${actor.model.num_action_chunks}
+      action_env_dim: 4
+    openpi_data:
+      repo_id: semi_taks_t1_pickcube
+      norm_stats_path: ${oc.env:T1_NORM_STATS,null}
+  optim:
+    lr: 1.0e-5
+    value_lr: 1.0e-4
+    adam_beta1: 0.9
+    adam_beta2: 0.95
+    adam_eps: 1.0e-8
+    weight_decay: 1.0e-10
+    clip_grad: 5.0
+    warmup_style: cosine
+    lr_warmup_steps: 20
+    total_training_steps: 8000
+  fsdp_config:
+    strategy: fsdp
+    sharding_strategy: no_shard
+    gradient_checkpointing: false
+    mixed_precision:
+      param_dtype: ${actor.model.precision}
+      reduce_dtype: ${actor.model.precision}
+      buffer_dtype: ${actor.model.precision}
+
+reward:
+  use_reward_model: false
+
+critic:
+  use_critic_model: false

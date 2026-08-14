@@ -151,7 +151,11 @@ def build_input_transforms(
     import openpi.models.model as _openpi_model
     import openpi.transforms as _openpi_transforms
 
-    from rlinf.models.embodiment.openpi.policies import franka_policy, libero_policy
+    from rlinf.models.embodiment.openpi.policies import (
+        franka_policy,
+        libero_policy,
+        maniskill_policy,
+    )
 
     _mt_map = {
         "pi0": _openpi_model.ModelType.PI0,
@@ -171,6 +175,16 @@ def build_input_transforms(
         input_transforms.append(
             franka_policy.FrankaEEInputs(
                 action_dim=action_dim, model_type=model_type_enum
+            )
+        )
+
+    elif env_type == "semi_taks_t1":
+        input_transforms.append(_openpi_transforms.InjectDefaultPrompt(default_prompt))
+        input_transforms.append(
+            maniskill_policy.ManiSkillInputs(
+                model_type=model_type_enum,
+                use_wrist_image=True,
+                default_prompt=default_prompt,
             )
         )
 

@@ -41,7 +41,11 @@ from openpi.transforms import DataTransformFn
 from torch.utils.data import Dataset
 
 from rlinf.data.storage.lerobot import episode_boundaries
-from rlinf.models.embodiment.openpi.policies import franka_policy, libero_policy
+from rlinf.models.embodiment.openpi.policies import (
+    franka_policy,
+    libero_policy,
+    maniskill_policy,
+)
 
 from .common import BaseDataLoaderImpl, ReCapMixtureDataset
 from .utils import (
@@ -85,6 +89,13 @@ _REPACK_KEYS = {
         "observation/state": "state",
         "actions": "actions",
         "prompt": "prompt",
+    },
+    "semi_taks_t1": {
+        "observation/image": "image",
+        "observation/wrist_image": "wrist_image",
+        "observation/state": "state",
+        "actions": "actions",
+        "prompt": "task",
     },
 }
 
@@ -329,6 +340,14 @@ class ValueDataset(Dataset):
                 franka_policy.FrankaEEInputs(
                     action_dim=action_dim,
                     model_type=model_type_enum,
+                )
+            )
+        elif robot == "semi_taks_t1":
+            transforms_list.append(
+                maniskill_policy.ManiSkillInputs(
+                    model_type=model_type_enum,
+                    use_wrist_image=True,
+                    default_prompt=default_prompt,
                 )
             )
 

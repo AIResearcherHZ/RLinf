@@ -102,3 +102,30 @@ def test_environment_reset_and_step() -> None:
     assert set(info) == {"success", "fail"}
     assert set(next_info) == {"success", "fail"}
     env.close()
+
+
+def test_rlt_openpi_observation_contract() -> None:
+    pytest.importorskip("gym")
+    import torch
+
+    from rlinf.envs.frankasim.frankasim_env import FrankaSimEnv
+
+    env = FrankaSimEnv.__new__(FrankaSimEnv)
+    env.obs_mode = "rgb"
+    env.state_key = "states"
+    env.wrap_obs_mode = "rlt_openpi"
+    env.task_prompt = "Pick up the cube."
+    env.use_wrist_as_extra_view = True
+    env._device = torch.device("cpu")
+    front = np.zeros((8, 8, 3), dtype=np.uint8)
+    wrist = np.ones((8, 8, 3), dtype=np.uint8)
+    env._pick_images = lambda raw_obs: (front, wrist)
+
+    observation = env._wrap_obs({"states": np.arange(7, dtype=np.float32)})
+
+    assert observation["states"].shape == (7,)
+    assert observation["main_images"].shape == (8, 8, 3)
+    assert observation["wrist_images"].shape == (8, 8, 3)
+    assert observation["extra_view_images"].shape == (1, 8, 8, 3)
+    assert observation["task_descriptions"] == "Pick up the cube."
+    assert observation["rlt_switch_flags"].item() is True

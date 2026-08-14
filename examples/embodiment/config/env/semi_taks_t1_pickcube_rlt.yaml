@@ -1,0 +1,22 @@
+env_type: frankasim
+gym_id: SemiTaksT1PickCubeVision-v0
+obs_mode: rgb
+obs_format: openpi
+wrap_obs_mode: rlt_openpi
+image_key: images
+camera: front
+extra_camera: wrist
+state_key: states
+task_prompt: Pick up the cube.
+render: false
+seed: 0
+total_num_envs: null
+group_size: 1
+auto_reset: true
+ignore_terminations: false
+max_steps_per_rollout_epoch: 100
+max_episode_steps: 100
+video_cfg:
+  save_video: false
+  info_on_video: true
+  video_base_dir: ${runner.logger.log_path}/video/train

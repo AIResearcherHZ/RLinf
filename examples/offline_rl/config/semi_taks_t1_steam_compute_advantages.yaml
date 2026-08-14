@@ -1,0 +1,31 @@
+advantage:
+  value_checkpoint: ${oc.env:T1_STEAM_VALUE_CKPT}
+  batch_size: 256
+  num_dataloader_workers_per_gpu: 12
+  prefetch_factor: 2
+  label_mode: quantile
+  rollout_quantile: 0.3
+  expert_quantile: 0.8
+  tag: semi_taks_t1_steam
+  model:
+    precision: bf16
+
+data:
+  k: 32
+  camera_keys: [image, wrist_image]
+  train_data_paths:
+    - dataset_path: ${oc.env:T1_SFT_DATA}
+      type: sft
+    - dataset_path: ${oc.env:T1_ROLLOUT_DATA}
+      type: rollout
+
+distributed:
+  backend: nccl
+  timeout: 3600
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null
+  job:
+    chdir: false

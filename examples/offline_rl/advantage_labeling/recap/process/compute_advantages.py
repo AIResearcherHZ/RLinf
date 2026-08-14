@@ -107,6 +107,15 @@ KEY_MAPPINGS = {
         "state": "observation/state",
         "task": "prompt",
     },
+    "semi_taks_t1": {
+        "image": "observation/image",
+        "wrist_image": "observation/wrist_image",
+        "state": "observation/state",
+        "observation.images.front": "observation/image",
+        "observation.images.wrist": "observation/wrist_image",
+        "observation.state": "observation/state",
+        "task": "prompt",
+    },
     "franka_3cam": {
         "observation.images.left_cam": "observation/images/left_cam",
         "observation.images.right_cam": "observation/images/right_cam",

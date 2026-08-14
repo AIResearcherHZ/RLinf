@@ -1,0 +1,19 @@
+data:
+  data_root: null
+  train_data_paths:
+    - dataset_path: ${oc.env:T1_SFT_DATA}
+      type: sft
+    - dataset_path: ${oc.env:T1_ROLLOUT_DATA}
+      type: rollout
+  dataset_type: sft
+  gamma: 1.0
+  failure_reward: -300.0
+  tag: semi_taks_t1_recap
+  num_workers: 128
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null
+  job:
+    chdir: false

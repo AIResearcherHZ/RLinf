@@ -1,0 +1,104 @@
+defaults:
+  - model/pi0_5_rlinf@actor.model
+  - hybrid_engines/fsdp@actor.fsdp_config
+  - override hydra/job_logging: stdout
+  - _self_
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null
+
+cluster:
+  num_nodes: 1
+  component_placement:
+    actor,env,rollout: all
+
+runner:
+  task_type: sft
+  logger:
+    log_path: ${oc.env:T1_RLT_STAGE1_LOG,../results/semi_taks_t1_rlt_stage1}
+    project_name: rlinf-rlt
+    experiment_name: semi_taks_t1_rlt_stage1_sft_openpi_pi05
+    logger_backends: [tensorboard]
+  max_epochs: -1
+  max_steps: 5000
+  val_check_interval: -1
+  save_interval: 250
+
+data:
+  train_data_paths:
+    - dataset_path: ${oc.env:T1_LEROBOT_DATA}
+      weight: 1.0
+
+actor:
+  group_name: ActorGroup
+  training_backend: fsdp
+  micro_batch_size: 8
+  global_batch_size: 128
+  seed: 0
+  model:
+    precision: fp32
+    model_path: ${oc.env:PI05_BASE_PATH}
+    model_type: openpi_rlinf
+    num_action_chunks: 10
+    action_dim: 4
+    add_value_head: false
+    num_steps: 5
+    openpi:
+      task: sft
+      config_name: pi05_semi_taks_t1
+      num_images_in_input: 2
+      train_expert_only: false
+      detach_critic_input: true
+      action_horizon: 10
+      action_chunk: ${actor.model.num_action_chunks}
+      action_env_dim: ${actor.model.action_dim}
+      num_steps: ${actor.model.num_steps}
+      model_action_dim: 32
+      paligemma_variant: gemma_2b
+      action_expert_variant: gemma_300m
+      max_token_len: 200
+      discrete_state_input: true
+      use_rlt: true
+      rlt_alpha: 1.0
+      rlt_input_dim: 2048
+      rlt_embed_dim: 2048
+      rlt_prefix_seq_len: 1024
+      rlt_num_layers: 2
+      rlt_num_heads: 8
+      rlt_mlp_ratio: 4.0
+      rlt_encoder_type: append_self_attention
+      rlt_image_only: false
+      rlt_use_mask: true
+    openpi_data:
+      repo_id: semi_taks_t1_pickcube
+      norm_stats_path: ${oc.env:T1_NORM_STATS,null}
+  optim:
+    lr: 2.5e-5
+    value_lr: 1.55e-4
+    adam_beta1: 0.9
+    adam_beta2: 0.95
+    adam_eps: 1.0e-8
+    weight_decay: 1.0e-10
+    clip_grad: 1.0
+    total_training_steps: 5000
+    lr_warmup_steps: 500
+    lr_scheduler: cosine
+    num_cycles: 0.5
+    min_lr: 2.5e-6
+  fsdp_config:
+    strategy: fsdp
+    sharding_strategy: no_shard
+    use_orig_params: false
+    gradient_checkpointing: false
+    mixed_precision:
+      param_dtype: bf16
+      reduce_dtype: fp32
+      buffer_dtype: fp32
+
+reward:
+  use_reward_model: false
+
+critic:
+  use_critic_model: false

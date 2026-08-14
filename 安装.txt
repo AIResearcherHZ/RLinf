@@ -1,0 +1,131 @@
+================================================================================
+## RLinf 安装指南
+================================================================================
+
+文档：rst_source/start/installation.html
+两种安装方式：UV 本地环境 / Docker 镜像，见文末"安装方式"。
+以下按 注释.txt 的方法分类组织。
+
+
+================================================================================
+## 一、在线 RL
+================================================================================
+
+### RLT
+  bash requirements/install.sh embodied --model openpi --env frankasim
+  source .venv/bin/activate
+  Docker: source switch_env openpi
+
+额外：
+  Stage 1 需 π₀.₅ base 权重 huggingface.co/lerobot/pi05_base
+  Semi-Taks-T1 assets 已位于 assets/Semi_Taks_T1
+
+### Sim-Real Co-Training
+  bash requirements/install.sh embodied --model openpi --env frankasim
+  source .venv/bin/activate
+  Docker: source switch_env openpi
+
+额外：
+  使用 Semi-Taks-T1 仿真和对应真机 LeRobot 数据
+
+
+================================================================================
+## 二、离线 RL
+================================================================================
+
+### STEAM
+  bash requirements/install.sh embodied --model openpi --env frankasim
+  source .venv/bin/activate
+  Docker: source switch_env openpi
+
+额外模型：
+  google/siglip-so400m-patch14-384
+  google/gemma-3-270m
+
+### RECAP
+  bash requirements/install.sh embodied --model openpi --env frankasim
+  source .venv/bin/activate
+  Docker: source switch_env openpi
+
+额外模型：
+  google/siglip2-so400m-patch14-224
+  google/gemma-3-270m
+  π₀.₅ base（PyTorch 格式，见 openpi 仓库转换说明）
+
+
+================================================================================
+## 三、SFT（非 RL，作 RL 冷启动）
+================================================================================
+
+### OpenPI SFT
+  bash requirements/install.sh embodied --model openpi --env frankasim
+  source .venv/bin/activate
+  Docker: source switch_env openpi
+
+
+================================================================================
+## 四、IL / DAgger
+================================================================================
+
+### Online LeRobot DAgger（π₀，Semi-Taks-T1）
+  bash requirements/install.sh embodied --model openpi --env frankasim
+  source .venv/bin/activate
+  Docker: source switch_env openpi
+
+### HG-DAgger（Semi-Taks-T1）
+  与 Online LeRobot DAgger 使用同一安装环境。
+
+
+================================================================================
+## 五、可视化
+================================================================================
+
+TensorBoard：
+  pip install tensorboard    # 通常已随环境安装
+  tensorboard --logdir ./logs --port 6006
+
+视频依赖：
+  pip install imageio        # RecordVideo 用，通常已随环境安装
+
+
+================================================================================
+## 六、安装方式
+================================================================================
+
+### 方式一：UV 本地环境
+  git clone https://github.com/RLinf/RLinf.git
+  cd RLinf
+  bash requirements/install.sh <target> --model <model> --env <env>
+  source .venv/bin/activate
+
+  target: embodied | agentic | docs
+  查看全部选项：bash requirements/install.sh --help
+
+  可选 flag：
+    --use-mirror          国内加速
+    --venv <dir>          指定 venv 目录
+    --python 3.10         behavior/d4rl 需要 3.10，默认 3.11.14
+    --torch <version>     指定 PyTorch wheel
+    --platform amd|ascend|musa   非 NVIDIA 显卡
+
+  国内加速 clone：git clone https://gh-proxy.com/github.com/RLinf/RLinf.git
+
+### 方式二：Docker
+  当前仓库没有同时包含 OpenPI 和 FrankaSim 的预构建镜像。
+  本批 Semi-Taks-T1 配方优先使用 UV 本地环境；Docker 需基于 docker/Dockerfile 自行组合构建。
+
+### 验证
+  python -c "import rlinf; print(rlinf.__file__)"
+  ray --version
+
+
+================================================================================
+## 通用额外依赖
+================================================================================
+
+国内 HF 加速：
+  export HF_ENDPOINT=https://hf-mirror.com
+
+ManiSkill assets（多数 embodied 方法需要）：
+  cd rlinf/envs/maniskill
+  hf download --repo-type dataset RLinf/maniskill_assets --local-dir ./assets

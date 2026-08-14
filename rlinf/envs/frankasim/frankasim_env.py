@@ -349,14 +349,17 @@ class FrankaSimEnv(gym.Env):
                 "extra_view_images": extra_view,
                 "states": state,
             }
-        if self.wrap_obs_mode == "openpi":
-            return {
+        if self.wrap_obs_mode in ("openpi", "rlt_openpi"):
+            observation = {
                 "main_images": main,
                 "wrist_images": extra,
                 "extra_view_images": extra_view,
                 "states": state,
                 "task_descriptions": self.task_prompt,
             }
+            if self.wrap_obs_mode == "rlt_openpi":
+                observation["rlt_switch_flags"] = torch.tensor(True)
+            return observation
         # default openvla
         return {
             "main_images": main,
