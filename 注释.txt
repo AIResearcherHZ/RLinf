@@ -1,69 +1,6 @@
 ================================================================================
-RLinf Franka-Sim Benchmark
+## Franka
 ================================================================================
-
-说明
---------------------------------------------------------------------------------
-
-Franka-Sim 是基于 RLinf SERL fork 的轻量 Franka Panda 仿真环境。RLinf 官方提供两条训练配方：状态观测下的 MLP + PPO，以及 RGB 观测下的 CNN + 异步 SAC。
-
-概览：MLP / CNN；PPO / SAC；PickCube 状态 / 视觉；1 节点、1 张 GPU。
-训练后主要观察：env/success_once。
-
-任务与接口
---------------------------------------------------------------------------------
-
-- PandaPickCube-v0：MLP + PPO 的状态观测 PickCube 任务。
-- PandaPickCubeVision-v0：CNN + 异步 SAC 的 RGB 观测 PickCube 任务。
-- 观测：状态任务使用本体状态与目标位置；视觉任务使用 RGB 图像与状态。
-- 动作：4 维连续动作，3 维末端位置增量 + 夹爪控制。
-- 奖励：稠密任务进度奖励。
-- Prompt：状态 MLP 配方不使用；视觉策略使用 env wrapper 提供的任务条件观测。
-
-安装
---------------------------------------------------------------------------------
-
-先克隆仓库：
-
-  git clone https://github.com/RLinf/RLinf.git
-  cd RLinf
-
-方式 1：Docker
-
-  docker run -it --rm --gpus all \
-    --shm-size 32g \
-    --network host \
-    --name rlinf \
-    -v .:/workspace/RLinf \
-    rlinf/rlinf:agentic-rlinf0.4-frankasim
-
-进入容器后：
-
-  source switch_env openvla
-
-方式 2：本地环境
-
-  bash requirements/install.sh embodied --model openvla --env frankasim
-  source .venv/bin/activate
-
-中国大陆用户可按官方页面添加镜像源或克隆镜像。
-
-下载模型
---------------------------------------------------------------------------------
-
-MLP + PPO 不需要下载 ResNet。CNN + SAC 需要 RLinf-ResNet10-pretrained：
-
-  cd /path/to/save/model
-  git lfs install
-  git clone https://huggingface.co/RLinf/RLinf-ResNet10-pretrained
-
-或：
-
-  pip install huggingface-hub
-  hf download RLinf/RLinf-ResNet10-pretrained \
-    --local-dir RLinf-ResNet10-pretrained
-
-在 examples/embodiment/config/frankasim_sac_cnn_async.yaml 中，rollout.model.model_path 和 actor.model.model_path 必须指向同一个检查点目录。
 
 训练配方
 --------------------------------------------------------------------------------
@@ -105,46 +42,9 @@ CNN + SAC（异步）
 CNN + 异步 SAC 的官方记录是在仿真环境中约一小时内学会稳定抓取策略。
 
 
-RLinf 项目内适配：Semi-Taks-T1
 ================================================================================
-
-说明
---------------------------------------------------------------------------------
-
-Semi-Taks-T1 是 RLinf 项目内的自定义 MuJoCo PickCube 环境，目标是与官方 Franka-Sim 页面保持同样的配方、入口和结果观测，只更换机器人本体和资产。
-
-当前已实现：CNN + 异步 SAC。当前未实现完整对齐：MLP + PPO（缺少 T1 状态配方）。
-
-环境：SemiTaksT1PickCubeVision-v0
-配方：examples/embodiment/config/semi_taks_t1_sac_cnn_async.yaml
-资产：assets/Semi_Taks_T1/pickcube.xml
-验证：tests/unit_tests/envs/test_semi_taks_t1_pickcube.py
-
-任务与接口
---------------------------------------------------------------------------------
-
-- 机器人：仅控制右臂和右夹爪；腰部、左臂和左夹爪通过约束锁定。
-- 观测：7 维 state + front 全局视图 + wrist 腕部视图，每路图像 128x128 RGB。
-- 动作：4 维连续动作，xyz 末端位置增量 + 夹爪控制。
-- 控制：操作空间力矩，20 个 MuJoCo control substeps。
-- 成功：方块高度超过 0.77；失败：方块高度低于 0.63；奖励为距离项 + 举升项，成功额外10。
-
-模型与算法
---------------------------------------------------------------------------------
-
-- 算法：异步 SAC，adv_type/loss_type 均为 embodied_sac。
-- 模型：CNN policy，actor 和 rollout 共用同一 T1_RESNET_PATH。
-- 输入参数：state_dim=7，action_dim=4，image_num=2，num_q_heads=10。
-- 默认：1 节点 / GPU 0；训练 1 个环境；评估 1 个环境。
-- replay buffer：内存缓存20000，最小开始缓冲区5条，默认自动保存。
-
-环境变量
---------------------------------------------------------------------------------
-
-  export T1_RESNET_PATH=$REPO_PATH/assets/RLinf-ResNet10-pretrained
-  export T1_PRETRAIN_LOG=$REPO_PATH/logs/semi_taks_t1_pretrain
-  export T1_PRETRAIN_BUFFER=$T1_PRETRAIN_LOG/replay_buffer
-  export T1_PRETRAIN_CKPT=$T1_PRETRAIN_LOG/checkpoints/global_step_<N>
+## Semi-Taks-T1
+================================================================================
 
 训练配方
 --------------------------------------------------------------------------------
@@ -175,4 +75,3 @@ TensorBoard：
   env.eval.video_cfg.save_video=True
   env.eval.video_cfg.video_base_dir=$T1_PRETRAIN_LOG/video/eval
 
-当前验证：模型锁定、右臂执行器、控制力矩测试通过；环境 reset/step 测试因当前 Python 缺少 gym 被跳过；目前没有独立 Semi-Taks-T1 E2E/CI recipe。
