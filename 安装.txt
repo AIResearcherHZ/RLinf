@@ -12,21 +12,35 @@
 ================================================================================
 
 ### RLT
+Semi-Taks-T1 / FrankaSim 版：
   bash requirements/install.sh embodied --model openpi --env frankasim
+  source .venv/bin/activate
+  Docker: source switch_env openpi
+
+ManiSkill 版（对应 maniskill_rlt_stage2_*_mlp.yaml）：
+  bash requirements/install.sh embodied --model openpi --env maniskill_libero
   source .venv/bin/activate
   Docker: source switch_env openpi
 
 额外：
   Stage 1 需 π₀.₅ base 权重 huggingface.co/lerobot/pi05_base
   Semi-Taks-T1 assets 已位于 assets/Semi_Taks_T1
+  ManiSkill assets 见文末"通用额外依赖"
 
 ### Sim-Real Co-Training
+Semi-Taks-T1 / FrankaSim 版：
   bash requirements/install.sh embodied --model openpi --env frankasim
+  source .venv/bin/activate
+  Docker: source switch_env openpi
+
+ManiSkill 数字孪生版（对应 maniskill_ppo_co_training_openpi_pi05.yaml）：
+  bash requirements/install.sh embodied --model openpi --env maniskill_libero
   source .venv/bin/activate
   Docker: source switch_env openpi
 
 额外：
   使用 Semi-Taks-T1 仿真和对应真机 LeRobot 数据
+  ManiSkill 数字孪生版使用 maniskill_pick_and_place_digital_twin 环境
 
 
 ================================================================================
@@ -34,7 +48,13 @@
 ================================================================================
 
 ### STEAM
+通用版（不绑定具体 env，离线 RL 用 lerobot 数据集）：
   bash requirements/install.sh embodied --model openpi --env frankasim
+  source .venv/bin/activate
+  Docker: source switch_env openpi
+
+若数据来自 ManiSkill 采集，env 改用 maniskill_libero：
+  bash requirements/install.sh embodied --model openpi --env maniskill_libero
   source .venv/bin/activate
   Docker: source switch_env openpi
 
@@ -43,7 +63,13 @@
   google/gemma-3-270m
 
 ### RECAP
+通用版（不绑定具体 env，离线 RL 用 lerobot 数据集）：
   bash requirements/install.sh embodied --model openpi --env frankasim
+  source .venv/bin/activate
+  Docker: source switch_env openpi
+
+若数据来自 ManiSkill 采集，env 改用 maniskill_libero：
+  bash requirements/install.sh embodied --model openpi --env maniskill_libero
   source .venv/bin/activate
   Docker: source switch_env openpi
 
@@ -58,7 +84,13 @@
 ================================================================================
 
 ### OpenPI SFT
+Semi-Taks-T1 / FrankaSim 版：
   bash requirements/install.sh embodied --model openpi --env frankasim
+  source .venv/bin/activate
+  Docker: source switch_env openpi
+
+ManiSkill 版（对应 maniskill_rlt_stage1_sft_openpi_pi05.yaml 等）：
+  bash requirements/install.sh embodied --model openpi --env maniskill_libero
   source .venv/bin/activate
   Docker: source switch_env openpi
 
@@ -68,9 +100,15 @@
 ================================================================================
 
 ### Online LeRobot DAgger（π₀，Semi-Taks-T1）
+Semi-Taks-T1 / FrankaSim 版：
   bash requirements/install.sh embodied --model openpi --env frankasim
   source .venv/bin/activate
   Docker: source switch_env openpi
+
+ManiSkill 版（对应 maniskill_dagger_mlp.yaml，MLP 策略）：
+  bash requirements/install.sh embodied --model <mlp|openpi> --env maniskill_libero
+  source .venv/bin/activate
+  Docker: source switch_env <对应模型>
 
 ### HG-DAgger（Semi-Taks-T1）
   与 Online LeRobot DAgger 使用同一安装环境。
@@ -108,6 +146,11 @@ TensorBoard：
     --torch <version>     指定 PyTorch wheel
     --platform amd|ascend|musa   非 NVIDIA 显卡
 
+  env 名注意：
+    ManiSkill 环境在 install.sh 里注册为 maniskill_libero（与 LIBERO 共用安装分支），
+    不是 maniskill；写 --env maniskill 会报 "unsupported env"。
+    SUPPORTED_ENVS 完整列表见 requirements/install.sh 顶部。
+
   国内加速 clone：git clone https://gh-proxy.com/github.com/RLinf/RLinf.git
 
 ### 方式二：Docker
@@ -126,6 +169,11 @@ TensorBoard：
 国内 HF 加速：
   export HF_ENDPOINT=https://hf-mirror.com
 
-ManiSkill assets（多数 embodied 方法需要）：
+ManiSkill assets（ManiSkill 版方法需要，install.sh --env maniskill_libero 已自动下载）：
+  # install.sh 已调用 download_assets.sh --assets maniskill，无需手动执行
+  # 若自动下载失败，手动补下：
+  bash requirements/embodied/download_assets.sh --assets maniskill
+  # 或按 RLinf 仓库内的 assets 集合下载（含 ManiSkill 官方 source assets）：
   cd rlinf/envs/maniskill
   hf download --repo-type dataset RLinf/maniskill_assets --local-dir ./assets
+  # MS_ASSET_DIR 默认在 <repo>/.maniskill，由 download_assets.sh 设置
