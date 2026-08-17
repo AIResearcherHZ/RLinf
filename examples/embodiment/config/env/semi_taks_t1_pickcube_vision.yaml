@@ -3,8 +3,8 @@ gym_id: SemiTaksT1PickCubeVision-v0
 
 obs_mode: rgb
 image_key: images
-camera: front
-extra_camera: wrist
+camera: left_eye_camera
+extra_camera: right_wrist_camera
 state_key: states
 render: false
 

@@ -4,10 +4,10 @@ obs_mode: rgb
 obs_format: openpi
 wrap_obs_mode: openpi
 image_key: images
-camera: front
-extra_camera: wrist
+camera: left_eye_camera
+extra_camera: right_wrist_camera
 state_key: states
-task_prompt: Pick up the cube.
+task_prompt: Put the cube into the blue box.
 render: false
 seed: 0
 total_num_envs: null

@@ -1,0 +1,15 @@
+env_type: frankasim
+gym_id: SemiTaksT1PickCubeVision-v0
+obs_mode: rgb
+image_key: images
+camera: left_eye_camera
+extra_camera: right_wrist_camera
+task_prompt: Put the cube into the blue box.
+max_episode_steps: 100
+
+collector:
+  repo_id: semi_taks_t1_put_cube
+  num_episodes: 100
+  max_attempts: 1000
+  seed: 0
+  fps: 10

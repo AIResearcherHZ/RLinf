@@ -1,101 +1,185 @@
-================================================================================
-## RLinf 训练配方选型笔记
-================================================================================
+# Semi-Taks-T1 指令
 
-约束：lerobot 数据为刚需。按方法大类组织。
+## 环境
 
+```bash
+conda activate gmr
+cd /home/xhz/RLinf
 
-================================================================================
-## 一、在线 RL
-================================================================================
+export REPO_PATH=/home/xhz/RLinf
+export EMBODIED_PATH=$REPO_PATH/examples/embodiment
+export PI05_BASE_PATH=/path/to/pi05_base_pytorch
+export T1_LEROBOT_DATA=$HOME/.cache/huggingface/lerobot/semi_taks_t1_put_cube
+export T1_SFT_DATA=$T1_LEROBOT_DATA
+export T1_ROLLOUT_DATA=/path/to/semi_taks_t1_rollout_lerobot
+export T1_NORM_STATS=/path/to/norm_stats.json
+```
 
-### RLT（RL Token）
-页面：rst_source/examples/embodied/rlt.html
-配置（Semi-Taks-T1）：
-  Stage 1  examples/sft/config/semi_taks_t1_rlt_stage1_sft_openpi_pi05.yaml
-  Stage 2  examples/embodiment/config/semi_taks_t1_rlt_stage2_ac_mlp.yaml
-           examples/embodiment/config/semi_taks_t1_rlt_stage2_td3_mlp.yaml
-Stage 1  lerobot 演示 SFT π₀.₅ + RLT token transformer → 表示 z_rl
-Stage 2  冻结 feature model，只训 MLP actor-critic
-         状态={z_rl, proprio, ref_chunk}，off-policy + transition replay
-reward  Semi-Taks-T1 使用末端-方块距离、抬升高度和 success bonus 的 dense reward
-         chunk 内 gamma 折扣进 TD target
-关键    loss_type=rlt_ac/rlt_td3, rollout.collect_transitions=True
-         rollout.rlt_feature_model.model_path → Stage 1 checkpoint
+## 数据采集
 
+### 真机遥操作
 
-### Sim-Real Co-Training
-页面：rst_source/examples/embodied/co_training.html
-配置（Semi-Taks-T1）：examples/embodiment/config/semi_taks_t1_ppo_co_training_openpi_pi05.yaml
-流程  Semi-Taks-T1 MuJoCo 在线 PPO + 真机 lerobot SFT loss 联合
-      L_Total = L_RL + beta * L_SFT
-数据  50 条真机 LeRobot 轨迹（RLCo-Example-Real-Data），actor.sft_data_path
-关键  enable_sft_co_train=True, sft_loss_weight=0.2
+```bash
+bash examples/embodiment/collect_data.sh realworld_collect_data
+```
 
+可选配置：
 
-================================================================================
-## 二、离线 RL
-================================================================================
+```text
+examples/embodiment/config/realworld_collect_data.yaml
+examples/embodiment/config/realworld_collect_data_pico.yaml
+examples/embodiment/config/realworld_collect_data_gello.yaml
+examples/embodiment/config/realworld_collect_data_zed_robotiq.yaml
+```
 
-### STEAM
-页面：rst_source/examples/embodied/steam.html
-配置（Semi-Taks-T1）：
-  examples/offline_rl/config/semi_taks_t1_steam_value_model_sft.yaml
-  examples/offline_rl/config/semi_taks_t1_steam_compute_advantages.yaml
-  examples/offline_rl/config/semi_taks_t1_steam_cfg_rl_openpi.yaml
-三阶段  Value Model SFT (SigLIP+Gemma3) → worst-of-N advantage → CFG Training (π₀.₅)
-特点  value 信号=专家演示时序进度，无需 reward 标注
-模型  π₀.₅ + SigLIP-so400m + Gemma3-270M
+### 清除旧仿真数据
 
+```bash
+rm -rf /home/xhz/.cache/huggingface/lerobot/semi_taks_t1_put_cube
+```
 
-### RECAP
-页面：rst_source/examples/embodied/recap.html
-配置（Semi-Taks-T1）：
-  examples/offline_rl/config/semi_taks_t1_recap_compute_returns.yaml
-  examples/offline_rl/config/semi_taks_t1_recap_value_model_sft.yaml
-  examples/offline_rl/config/semi_taks_t1_recap_compute_advantages.yaml
-  examples/offline_rl/config/semi_taks_t1_cfg_rl_openpi.yaml
-四阶段  Compute Returns → Value Model SFT → Compute Advantages → CFG Training
-特点  value 信号=回归 discounted return（需 reward），与 STEAM 共享 CFG 阶段
-数据  sft（全成功）+ rollout（含失败）两类 lerobot 数据集
+### 仿真自动采集
 
+```bash
+PYTHONPATH=/home/xhz/RLinf \
+python toolkits/lerobot/collect_semi_taks_t1_lerobot.py \
+  --repo-id semi_taks_t1_put_cube \
+  --num-episodes 100 \
+  --max-attempts 1000 \
+  --max-steps 100 \
+  --seed 0 \
+  --fps 10 \
+  --control-mode heuristic \
+  --viewer
+```
 
-================================================================================
-## 三、SFT（非 RL，作 RL 冷启动）
-================================================================================
+### VR 遥操作采集
 
-  OpenPI SFT  examples/sft/config/semi_taks_t1_sft_openpi_pi05.yaml
-流程  SFT 拿 checkpoint → 再做 RL 微调
+先启动 VR 数据发送端，再执行：
 
+```bash
+PYTHONPATH=/home/xhz/RLinf \
+python toolkits/lerobot/collect_semi_taks_t1_lerobot.py \
+  --repo-id semi_taks_t1_put_cube \
+  --num-episodes 100 \
+  --max-attempts 1000 \
+  --max-steps 100 \
+  --seed 0 \
+  --fps 10 \
+  --control-mode vr \
+  --operator-height 1.75 \
+  --taks-sdk-path /home/xhz/taks-controller-web/backend/libs/SDK \
+  --vr-ip 0.0.0.0 \
+  --vr-port 7000 \
+  --viewer
+```
 
-================================================================================
-## 四、IL / DAgger
-================================================================================
+```bash
+ls -lah /home/xhz/.cache/huggingface/lerobot/semi_taks_t1_put_cube
+```
 
-Online LeRobot DAgger（π₀，Semi-Taks-T1）
-  配置  semi_taks_t1_dagger_openpi_lerobot.yaml
-  流程  env 在线收集 LeRobot → RollingLeRobotDataset，expert relabel + beta schedule
+`--viewer` 下不要设置 `MUJOCO_GL=egl`。仅成功回合写入数据集。
 
-HG-DAgger 复用 Semi-Taks-T1 DAgger 配置，将 algorithm.dagger.only_save_expert=True 并接入 T1 专家策略。
+## SFT
 
+```bash
+bash examples/sft/run_vla_sft.sh semi_taks_t1_sft_openpi_pi05
+```
 
-================================================================================
-## 五、可视化
-================================================================================
+## RLT
 
+### Stage 1
+
+```bash
+bash examples/sft/run_vla_sft.sh semi_taks_t1_rlt_stage1_sft_openpi_pi05
+```
+
+### Stage 2 AC
+
+```bash
+export T1_RLT_STAGE1_CKPT=/path/to/rlt_stage1/checkpoints/global_step_N/actor
+bash examples/embodiment/run_embodiment.sh semi_taks_t1_rlt_stage2_ac_mlp
+```
+
+### Stage 2 TD3
+
+```bash
+export T1_RLT_STAGE1_CKPT=/path/to/rlt_stage1/checkpoints/global_step_N/actor
+bash examples/embodiment/run_embodiment.sh semi_taks_t1_rlt_stage2_td3_mlp
+```
+
+## Sim-Real Co-Training
+
+```bash
+export T1_SFT_CKPT=/path/to/openpi_sft/checkpoints/global_step_N/actor
+export T1_REAL_LEROBOT_DATA=/path/to/real_robot_lerobot
+bash examples/embodiment/run_embodiment.sh \
+  semi_taks_t1_ppo_co_training_openpi_pi05
+```
+
+## Online DAgger
+
+```bash
+export T1_STUDENT_CKPT=/path/to/dagger_student
+export T1_EXPERT_CKPT=/path/to/dagger_expert
+bash examples/embodiment/run_embodiment.sh \
+  semi_taks_t1_dagger_openpi_lerobot
+```
+
+仅采集专家数据：
+
+```bash
+python examples/embodiment/train_embodied_agent.py \
+  --config-path /home/xhz/RLinf/examples/embodiment/config \
+  --config-name semi_taks_t1_dagger_openpi_lerobot \
+  algorithm.dagger.only_save_expert=True
+```
+
+## STEAM
+
+```bash
+bash examples/offline_rl/advantage_labeling/steam/run_steam_sft.sh \
+  semi_taks_t1_steam_value_model_sft
+
+export T1_STEAM_VALUE_CKPT=/path/to/steam_value/checkpoints/global_step_N/actor
+bash examples/offline_rl/advantage_labeling/steam/process/run_compute_advantages_ensemble.sh \
+  semi_taks_t1_steam_compute_advantages
+
+bash examples/offline_rl/policy_optimization/cfg_rl/run_cfg_rl.sh \
+  semi_taks_t1_steam_cfg_rl_openpi
+```
+
+## RECAP
+
+```bash
+bash examples/offline_rl/advantage_labeling/recap/process/run_compute_returns.sh \
+  semi_taks_t1_recap_compute_returns
+
+bash examples/offline_rl/advantage_labeling/recap/run_value_sft.sh \
+  semi_taks_t1_recap_value_model_sft
+
+export T1_RECAP_VALUE_CKPT=/path/to/recap_value/checkpoints/global_step_N/actor
+bash examples/offline_rl/advantage_labeling/recap/process/run_compute_advantages.sh \
+  semi_taks_t1_recap_compute_advantages
+
+bash examples/offline_rl/policy_optimization/cfg_rl/run_cfg_rl.sh \
+  semi_taks_t1_cfg_rl_openpi
+```
+
+## 工具
+
+```bash
+python toolkits/lerobot/calculate_norm_stats.py --help
+python toolkits/lerobot/visualize_lerobot_dataset.py --help
 tensorboard --logdir ./logs --port 6006
-指标  env/success_once, rollout/env_info/return, train/sft_loss, train/ppo_loss
-视频  需 obs_mode=rgb（state 模式不生成视频）
-      env.eval.video_cfg.save_video=True
+```
 
+保存评测视频：
 
-================================================================================
-## 六、决策树
-================================================================================
-
-lerobot 数据刚需？
-  ├─ 在线 + 轻量？      RLT
-  ├─ 在线 sim + 真机？  Sim-Real Co-Training
-  ├─ 纯离线无 reward？  STEAM
-  ├─ 纯离线有 reward？  RECAP
-  └─ IL 可接受？        DAgger / HG-DAgger
+```yaml
+env:
+  eval:
+    obs_mode: rgb
+    video_cfg:
+      save_video: true
+```

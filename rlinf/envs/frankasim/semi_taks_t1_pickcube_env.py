@@ -81,6 +81,8 @@ class SemiTaksT1PickCubeEnv(gym.Env):
         self._block_joint_id = self.model.joint("block_joint").id
         self._block_qpos_adr = self.model.jnt_qposadr[self._block_joint_id]
         self._block_body_id = self.model.body("block").id
+        self._target_box_body_id = self.model.body("target_box").id
+        self._tabletop_z = 0.665
         self._mass_matrix = np.zeros((self.model.nv, self.model.nv))
         self._jacobian_position = np.zeros((3, self.model.nv))
         self._jacobian_rotation = np.zeros((3, self.model.nv))
@@ -96,7 +98,11 @@ class SemiTaksT1PickCubeEnv(gym.Env):
                 {
                     "states": state_space,
                     "images": gym.spaces.Dict(
-                        {"front": image_space, "wrist": image_space}
+                        {
+                            "left_eye": image_space,
+                            "right_eye": image_space,
+                            "wrist": image_space,
+                        }
                     ),
                 }
             )
@@ -115,14 +121,23 @@ class SemiTaksT1PickCubeEnv(gym.Env):
             self._rng = np.random.default_rng(seed)
         mujoco.mj_resetDataKeyframe(self.model, self.data, 0)
         block_qpos = self._block_qpos_adr
+        box_x = self._rng.uniform(0.48, 0.60)
+        box_y = self._rng.uniform(-0.24, -0.10)
+        self.model.body_pos[self._target_box_body_id, :2] = (box_x, box_y)
         self.data.qpos[block_qpos : block_qpos + 3] = np.array(
             [
-                self._rng.uniform(0.43, 0.50),
-                self._rng.uniform(-0.24, -0.10),
-                0.685,
+                self._rng.uniform(0.22, 0.30),
+                self._rng.uniform(-0.34, 0.02),
+                self._tabletop_z + 0.02,
             ]
         )
-        self.data.qpos[block_qpos + 3 : block_qpos + 7] = (1.0, 0.0, 0.0, 0.0)
+        yaw = self._rng.uniform(-np.pi, np.pi)
+        self.data.qpos[block_qpos + 3 : block_qpos + 7] = (
+            np.cos(yaw / 2),
+            0.0,
+            0.0,
+            np.sin(yaw / 2),
+        )
         self.data.ctrl[:] = 0.0
         mujoco.mj_forward(self.model, self.data)
         self._target_position[:] = self.data.site_xpos[self._ee_site_id]
@@ -142,8 +157,8 @@ class SemiTaksT1PickCubeEnv(gym.Env):
         self._target_position += action[:3] * 0.025
         self._target_position[:] = np.clip(
             self._target_position,
-            np.array([0.25, -0.40, 0.69]),
-            np.array([0.65, 0.05, 0.95]),
+            np.array([0.20, -0.45, 0.62]),
+            np.array([0.70, 0.10, 0.95]),
         )
         self.data.ctrl[self._gripper_actuator_id] = 0.9 if action[3] > 0 else 0.0
         for _ in range(self.control_substeps):
@@ -154,15 +169,15 @@ class SemiTaksT1PickCubeEnv(gym.Env):
         ee_pos = self.data.site_xpos[self._ee_site_id]
         block_pos = self.data.xpos[self._block_body_id]
         distance = float(np.linalg.norm(ee_pos - block_pos))
-        lift = max(0.0, float(block_pos[2] - 0.685))
+        lift = max(0.0, float(block_pos[2] - (self._tabletop_z + 0.02)))
         reward = float(1.0 - np.tanh(8.0 * distance) + 5.0 * lift)
         if info["success"]:
             reward += 10.0
         return self._observation(), reward, bool(info["success"]), False, info
 
     def render(self) -> np.ndarray:
-        """Render the front camera."""
-        return self._render_camera("front")
+        """Render the left eye camera."""
+        return self._render_camera("left_eye_camera")
 
     def close(self) -> None:
         """Release the renderer."""
@@ -236,7 +251,8 @@ class SemiTaksT1PickCubeEnv(gym.Env):
         }
         if self.image_obs:
             observation["images"] = {
-                "front": self._render_camera("front"),
+                "left_eye": self._render_camera("left_eye_camera"),
+                "right_eye": self._render_camera("right_eye_camera"),
                 "wrist": self._render_camera("right_wrist_camera"),
             }
         return observation
@@ -248,5 +264,9 @@ class SemiTaksT1PickCubeEnv(gym.Env):
         return self._renderer.render().copy()
 
     def _info(self) -> dict[str, Any]:
-        block_height = float(self.data.xpos[self._block_body_id, 2])
-        return {"success": block_height > 0.77, "fail": block_height < 0.63}
+        block_pos = self.data.xpos[self._block_body_id]
+        box_pos = self.data.xpos[self._target_box_body_id]
+        in_box_xy = bool(np.all(np.abs(block_pos[:2] - box_pos[:2]) < 0.04))
+        in_box_z = bool(self._tabletop_z + 0.01 < block_pos[2] < 0.70)
+        success = in_box_xy and in_box_z
+        return {"success": success, "fail": bool(block_pos[2] < 0.63)}

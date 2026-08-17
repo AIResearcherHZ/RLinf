@@ -299,6 +299,8 @@
                   <geom type="mesh" contype="0" conaffinity="0" group="1" density="0"
                     mesh="neck_pitch_link" />
                   <geom name="head_collision" type="mesh" mesh="neck_pitch_link" contype="1" conaffinity="1" group="0" />
+                  <camera name="left_eye_camera" pos="0.095 0.026 0.115" xyaxes="0 -1 0 0.28 0 0.96" fovy="60" resolution="128 128" />
+                  <camera name="right_eye_camera" pos="0.095 -0.069 0.115" xyaxes="0 -1 0 0.28 0 0.96" fovy="60" resolution="128 128" />
                 </body>
               </body>
             </body>
