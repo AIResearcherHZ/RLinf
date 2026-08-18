@@ -22,3 +22,17 @@ PKG-INFO
 *.egg-info/
 .claude/settings.json
 .github/context-mode
+
+# Downloaded model weights / large assets (not for git)
+assets/gemma-3-270m/
+assets/pi05_base/
+assets/siglip-so400m-patch14-384/
+assets/siglip2-so400m-patch14-224/
+
+# Downloaded wheel / zip artifacts
+*.whl
+bridge_v2_real2sim_dataset.zip
+physx_linux-so.zip
+
+# Cloned external repos (installed into venv, not part of RLinf source)
+ManiSkill/
