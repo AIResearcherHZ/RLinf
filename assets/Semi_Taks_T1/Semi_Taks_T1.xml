@@ -259,13 +259,13 @@
                             <inertial mass="0.0124486879311" pos="0.00941343730268 0.00142015981541 3.4591826082e-06" fullinertia="1.40824938506e-06 2.4936054937e-06 2.01735212966e-06 -3.74848272262e-07 1.51236828698e-09 3.4789020018e-10" />
                             <joint name="dm_right_gripper_left_finger_joint" type="slide" axis="0 1 0" range="0 0.0275" damping="1" armature="0.00031262" />
                             <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" mesh="dm_right_gripper_left_finger" />
-                            <geom name="dm_right_gripper_left_finger_collision" type="mesh" mesh="dm_right_gripper_left_finger" contype="1" conaffinity="1" condim="4" friction="1 0.005 0.0001" group="0" />
+                            <geom name="dm_right_gripper_left_finger_collision" type="mesh" mesh="dm_right_gripper_left_finger" contype="1" conaffinity="1" condim="6" friction="2 0.5 0.05" solref="0.005 1" margin="0.002" group="0" />
                           </body>
                           <body name="dm_right_gripper_right_finger" pos="0.103053147823 0.0617509221866 -0.0002235078382">
                             <inertial mass="0.0121667495528" pos="0.00916304444982 -0.00136309905404 7.02945373683e-06" fullinertia="1.39548755996e-06 2.44090358007e-06 1.97374739841e-06 3.67259606639e-07 1.65789571653e-10 -5.27797576392e-11" />
                             <joint name="dm_right_gripper_right_finger_joint" type="slide" axis="0 -1 0" range="0 0.0275" damping="1" armature="0.00031262" />
                             <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" mesh="dm_right_gripper_right_finger" />
-                            <geom name="dm_right_gripper_right_finger_collision" type="mesh" mesh="dm_right_gripper_right_finger" contype="1" conaffinity="1" condim="4" friction="1 0.005 0.0001" group="0" />
+                            <geom name="dm_right_gripper_right_finger_collision" type="mesh" mesh="dm_right_gripper_right_finger" contype="1" conaffinity="1" condim="6" friction="2 0.5 0.05" solref="0.005 1" margin="0.002" group="0" />
                           </body>
                         </body>
                       </body>
@@ -349,19 +349,19 @@
     <position name="left_wrist_yaw_joint" joint="left_wrist_yaw_joint" ctrlrange="-0.9 0.9" kp="6.632374157532048" kv="0.42223005264246816" forcerange="-7 7" />
     <position name="left_wrist_pitch_joint" joint="left_wrist_pitch_joint" ctrlrange="-0.9 0.9" kp="6.632374157532048" kv="0.42223005264246816" forcerange="-7 7" />
     <!-- Right Arm -->
-    <motor name="right_shoulder_pitch_joint" joint="right_shoulder_pitch_joint" ctrlrange="-27 27" forcerange="-27 27" />
-    <motor name="right_shoulder_roll_joint" joint="right_shoulder_roll_joint" ctrlrange="-27 27" forcerange="-27 27" />
-    <motor name="right_shoulder_yaw_joint" joint="right_shoulder_yaw_joint" ctrlrange="-27 27" forcerange="-27 27" />
-    <motor name="right_elbow_joint" joint="right_elbow_joint" ctrlrange="-27 27" forcerange="-27 27" />
-    <motor name="right_wrist_roll_joint" joint="right_wrist_roll_joint" ctrlrange="-7 7" forcerange="-7 7" />
-    <motor name="right_wrist_yaw_joint" joint="right_wrist_yaw_joint" ctrlrange="-7 7" forcerange="-7 7" />
-    <motor name="right_wrist_pitch_joint" joint="right_wrist_pitch_joint" ctrlrange="-7 7" forcerange="-7 7" />
+    <position name="right_shoulder_pitch_joint" joint="right_shoulder_pitch_joint" ctrlrange="-3.1415 1.0472" kp="112.4345" kv="7.1578" forcerange="-27 27" />
+    <position name="right_shoulder_roll_joint" joint="right_shoulder_roll_joint" ctrlrange="-1.5882 2.2515" kp="112.4345" kv="7.1578" forcerange="-27 27" />
+    <position name="right_shoulder_yaw_joint" joint="right_shoulder_yaw_joint" ctrlrange="-2.618 2.618" kp="112.4345" kv="7.1578" forcerange="-27 27" />
+    <position name="right_elbow_joint" joint="right_elbow_joint" ctrlrange="-0.7 1.35" kp="112.4345" kv="7.1578" forcerange="-27 27" />
+    <position name="right_wrist_roll_joint" joint="right_wrist_roll_joint" ctrlrange="-2.67 2.67" kp="6.6324" kv="0.4222" forcerange="-7 7" />
+    <position name="right_wrist_yaw_joint" joint="right_wrist_yaw_joint" ctrlrange="-0.9 0.9" kp="6.6324" kv="0.4222" forcerange="-7 7" />
+    <position name="right_wrist_pitch_joint" joint="right_wrist_pitch_joint" ctrlrange="-0.9 0.9" kp="6.6324" kv="0.4222" forcerange="-7 7" />
     <!-- Neck -->
     <position name="neck_yaw_joint" joint="neck_yaw_joint" ctrlrange="-1.57 1.57" kp="1.234174291147422" kv="0.07856997562921929" forcerange="-3 3" />
     <position name="neck_roll_joint" joint="neck_roll_joint" ctrlrange="-0.873 0.873" kp="1.2341742911474222" kv="0.07856997562921929" forcerange="-3 3" />
     <position name="neck_pitch_joint" joint="neck_pitch_joint" ctrlrange="-0.873 0.873" kp="1.234174291147422" kv="0.07856997562921929" forcerange="-3 3" />
     <position name="left_gripper" joint="dm_left_gripper_drive_joint" kp="12.34174291147422" kv="0.7856997562921929" ctrlrange="0 0.9" forcerange="-3 3" />
-    <position name="right_gripper" joint="dm_right_gripper_drive_joint" kp="12.34174291147422" kv="0.7856997562921929" ctrlrange="0 0.9" forcerange="-3 3" />
+    <position name="right_gripper" joint="dm_right_gripper_drive_joint" kp="80" kv="0.2" ctrlrange="0 0.9" forcerange="-3 3" />
   </actuator>
 
   <!-- Sensors -->

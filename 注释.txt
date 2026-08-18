@@ -48,7 +48,7 @@ python toolkits/lerobot/collect_semi_taks_t1_lerobot.py \
   --max-attempts 1000 \
   --max-steps 100 \
   --seed 0 \
-  --fps 10 \
+  --fps 50 \
   --control-mode heuristic \
   --viewer
 ```
@@ -65,9 +65,9 @@ python toolkits/lerobot/collect_semi_taks_t1_lerobot.py \
   --max-attempts 1000 \
   --max-steps 100 \
   --seed 0 \
-  --fps 10 \
+  --fps 50 \
   --control-mode vr \
-  --operator-height 1.75 \
+  --operator-height 1.83 \
   --taks-sdk-path /home/xhz/taks-controller-web/backend/libs/SDK \
   --vr-ip 0.0.0.0 \
   --vr-port 7000 \

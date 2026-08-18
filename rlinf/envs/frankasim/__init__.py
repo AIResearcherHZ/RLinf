@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import gym
+import gymnasium as gym
 
 from .frankasim_env import FrankaSimEnv
 from .semi_taks_t1_pickcube_env import SemiTaksT1PickCubeEnv

@@ -15,7 +15,7 @@
 from pathlib import Path
 from typing import Any, Optional
 
-import gym
+import gymnasium as gym
 import mujoco
 import numpy as np
 
@@ -124,11 +124,12 @@ class SemiTaksT1PickCubeEnv(gym.Env):
         box_x = self._rng.uniform(0.48, 0.60)
         box_y = self._rng.uniform(-0.24, -0.10)
         self.model.body_pos[self._target_box_body_id, :2] = (box_x, box_y)
+        wrist_xy = self.data.xpos[self.model.body("right_wrist_pitch_link").id, :2]
         self.data.qpos[block_qpos : block_qpos + 3] = np.array(
             [
-                self._rng.uniform(0.22, 0.30),
-                self._rng.uniform(-0.34, 0.02),
-                self._tabletop_z + 0.02,
+                np.clip(wrist_xy[0] - 0.10, 0.22, 0.42),
+                np.clip(wrist_xy[1], -0.30, 0.05),
+                self._tabletop_z + 0.012,
             ]
         )
         yaw = self._rng.uniform(-np.pi, np.pi)
@@ -169,7 +170,7 @@ class SemiTaksT1PickCubeEnv(gym.Env):
         ee_pos = self.data.site_xpos[self._ee_site_id]
         block_pos = self.data.xpos[self._block_body_id]
         distance = float(np.linalg.norm(ee_pos - block_pos))
-        lift = max(0.0, float(block_pos[2] - (self._tabletop_z + 0.02)))
+        lift = max(0.0, float(block_pos[2] - (self._tabletop_z + 0.012)))
         reward = float(1.0 - np.tanh(8.0 * distance) + 5.0 * lift)
         if info["success"]:
             reward += 10.0
