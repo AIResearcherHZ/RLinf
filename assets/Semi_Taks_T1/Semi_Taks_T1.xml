@@ -361,7 +361,7 @@
     <position name="neck_roll_joint" joint="neck_roll_joint" ctrlrange="-0.873 0.873" kp="1.2341742911474222" kv="0.07856997562921929" forcerange="-3 3" />
     <position name="neck_pitch_joint" joint="neck_pitch_joint" ctrlrange="-0.873 0.873" kp="1.234174291147422" kv="0.07856997562921929" forcerange="-3 3" />
     <position name="left_gripper" joint="dm_left_gripper_drive_joint" kp="12.34174291147422" kv="0.7856997562921929" ctrlrange="0 0.9" forcerange="-3 3" />
-    <position name="right_gripper" joint="dm_right_gripper_drive_joint" kp="80" kv="0.2" ctrlrange="0 0.9" forcerange="-3 3" />
+    <position name="right_gripper" joint="dm_right_gripper_drive_joint" kp="200" kv="0.5" ctrlrange="0 0.9" forcerange="-3 3" />
   </actuator>
 
   <!-- Sensors -->

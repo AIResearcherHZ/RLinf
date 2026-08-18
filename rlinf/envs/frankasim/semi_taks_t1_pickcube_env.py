@@ -124,11 +124,11 @@ class SemiTaksT1PickCubeEnv(gym.Env):
         box_x = self._rng.uniform(0.48, 0.60)
         box_y = self._rng.uniform(-0.24, -0.10)
         self.model.body_pos[self._target_box_body_id, :2] = (box_x, box_y)
-        wrist_xy = self.data.xpos[self.model.body("right_wrist_pitch_link").id, :2]
+        gripper_xy = self.data.site_xpos[self._ee_site_id, :2]
         self.data.qpos[block_qpos : block_qpos + 3] = np.array(
             [
-                np.clip(wrist_xy[0] - 0.10, 0.22, 0.42),
-                np.clip(wrist_xy[1], -0.30, 0.05),
+                np.clip(gripper_xy[0] + self._rng.uniform(-0.04, 0.04), 0.28, 0.40),
+                np.clip(gripper_xy[1] + self._rng.uniform(-0.04, 0.04), -0.24, -0.12),
                 self._tabletop_z + 0.012,
             ]
         )

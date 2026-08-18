@@ -13,8 +13,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""采集 Semi-Taks-T1 将 cube 放入桌面目标框的 LeRobot 数据。"""
-
 from __future__ import annotations
 
 import argparse
@@ -23,7 +21,7 @@ import shutil
 import sys
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 os.environ.pop("WAYLAND_DISPLAY", None)
 os.environ["XDG_SESSION_TYPE"] = "x11"
@@ -32,17 +30,13 @@ import mujoco
 import mujoco.viewer
 import numpy as np
 
-if TYPE_CHECKING:
-    from rlinf.envs.frankasim.semi_taks_t1_pickcube_env import (
-        SemiTaksT1PickCubeEnv,
-    )
+_VR_POS_SCALE = None
+_VR_GRIPPER_THRESHOLD = 0.5
 
 
 class _PickPlaceStateMachine:
-    """基于到位和稳定条件推进的闭环 pick-and-place 状态机。"""
-
-    _MAX_STATE = 9
     _STATE_NAMES = (
+        "orient_down",
         "approach_above_cube",
         "lower_to_cube",
         "close_gripper",
@@ -54,128 +48,126 @@ class _PickPlaceStateMachine:
         "retreat",
     )
 
-    def __init__(self) -> None:
-        self.state = 0
-        self._settled_steps = 0
-        self._dwell_steps = 0
-        self._lift_target: np.ndarray | None = None
-        self._wrist_bid: int | None = None
+    _TARGETS = {
+        1: ("block", 0.08, -1.0),
+        2: ("block", 0.0, -1.0),
+        3: ("block", 0.0, 1.0),
+        4: ("block", 0.0, 1.0),
+        6: ("box", 0.08, 1.0),
+        7: ("box", 0.03, 1.0),
+        8: ("box", 0.03, -1.0),
+        9: ("box", 0.12, -1.0),
+    }
 
-    @property
-    def done(self) -> bool:
-        return self.state >= self._MAX_STATE
+    _GRIPPER_LENGTH = 0.103
+    _DOWN_QUAT = np.array(
+        [np.cos(np.pi / 4), 0.0, np.sin(np.pi / 4), 0.0], dtype=np.float64
+    )
+    _POS_TOL = 0.03
+    _ORIENT_TOL = 0.25
+    _HOVER_Z = 0.05
 
-    def reset(self) -> None:
-        self.state = 0
-        self._settled_steps = 0
-        self._dwell_steps = 0
-        self._lift_target = None
-
-    def state_name(self, state: int | None = None) -> str:
-        index = self.state if state is None else state
-        return self._STATE_NAMES[index] if index < self._MAX_STATE else "done"
-
-    def _wrist_pos(self, env: SemiTaksT1PickCubeEnv) -> np.ndarray:
-        if self._wrist_bid is None:
-            self._wrist_bid = env.model.body("right_wrist_pitch_link").id
-        return env.data.xpos[self._wrist_bid]
-
-    def target(self, env: SemiTaksT1PickCubeEnv) -> tuple[np.ndarray, float]:
-        cube = env.data.xpos[env._block_body_id].copy()
-        box = env.data.xpos[env._target_box_body_id].copy()
-        if self.state == 0:
-            return cube + np.array([0.0, 0.0, 0.08]), -1.0
-        if self.state == 1:
-            return cube + np.array([0.0, 0.0, 0.005]), -1.0
-        if self.state in (2, 3, 4):
-            if self.state == 4 and self._lift_target is not None:
-                return self._lift_target, 1.0
-            return cube + np.array([0.0, 0.0, 0.005]), 1.0
-        if self.state == 5:
-            return box + np.array([0.0, 0.0, 0.13]), 1.0
-        if self.state == 6:
-            return box + np.array([0.0, 0.0, 0.065]), 1.0
-        if self.state == 7:
-            return box + np.array([0.0, 0.0, 0.065]), -1.0
-        return box + np.array([0.0, 0.0, 0.12]), -1.0
-
-    def advance(self, env: SemiTaksT1PickCubeEnv) -> None:
-        if self.done:
-            return
-        target, gripper = self.target(env)
-        wrist = self._wrist_pos(env)
-        ee_error = float(np.linalg.norm(target - wrist))
-        ee_speed = float(np.linalg.norm(env.data.cvel[self._wrist_bid, 3:]))
-        gripper_pos = float(env.data.qpos[env._gripper_qpos_adr])
-        gripper_target = 0.9 if gripper > 0 else 0.0
-        gripper_done = abs(gripper_pos - gripper_target) < 0.08
-        reached = ee_error < 0.02 and ee_speed < 0.15 and gripper_done
-        grasped = self._has_grasp_contacts(env) and gripper_pos > 0.2
-        state_reached = (
-            ee_error < 0.02 and ee_speed < 0.15 and grasped
-            if self.state == 2
-            else reached
-        )
-        if state_reached:
-            self._settled_steps += 1
-        else:
-            self._settled_steps = 0
-        if self.state == 2 and self._settled_steps >= 3:
-            self._log_transition(env, 3)
-            self.state = 3
-            self._settled_steps = 0
-            self._dwell_steps = 8
-        elif self.state == 3:
-            self._dwell_steps -= 1
-            if self._dwell_steps <= 0:
-                self._log_transition(env, 4)
-                self._lift_target = env.data.xpos[env._block_body_id].copy()
-                self._lift_target[2] += 0.08
-                self.state = 4
-                self._settled_steps = 0
-        elif self.state == 7:
-            if reached:
-                self._dwell_steps -= 1
-            if self._dwell_steps <= 0:
-                self._log_transition(env, 8)
-                self.state = 8
-                self._settled_steps = 0
-        elif self.state in (0, 1, 4, 5, 6, 8) and self._settled_steps >= 3:
-            self._log_transition(env, self.state + 1)
-            self.state += 1
-            self._settled_steps = 0
-            if self.state == 7:
-                self._dwell_steps = 8
-
-    def _log_transition(self, env: SemiTaksT1PickCubeEnv, next_state: int) -> None:
-        wrist_z = float(self._wrist_pos(env)[2])
-        cube_z = float(env.data.xpos[env._block_body_id][2])
-        print(
-            f"[状态机] {self.state}:{self.state_name()} -> "
-            f"{next_state}:{self.state_name(next_state)} "
-            f"wrist_z={wrist_z:.3f} cube_z={cube_z:.3f}"
-        )
-
-    @staticmethod
-    def _has_grasp_contacts(env: SemiTaksT1PickCubeEnv) -> bool:
-        block_geom_id = env.model.geom("block").id
-        finger_geom_ids = {
+    def __init__(self, env: Any) -> None:
+        self._env = env
+        self._wrist_bid = env.model.body("right_wrist_pitch_link").id
+        self._block_geom = env.model.geom("block").id
+        self._finger_geoms = {
             env.model.geom("dm_right_gripper_left_finger_collision").id,
             env.model.geom("dm_right_gripper_right_finger_collision").id,
         }
-        contacted_fingers = set()
-        for contact_idx in range(env.data.ncon):
-            contact = env.data.contact[contact_idx]
-            if contact.geom1 == block_geom_id and contact.geom2 in finger_geom_ids:
-                contacted_fingers.add(contact.geom2)
-            elif contact.geom2 == block_geom_id and contact.geom1 in finger_geom_ids:
-                contacted_fingers.add(contact.geom1)
-        return contacted_fingers == finger_geom_ids
+        self.state = 0
+        self._settled = 0
+        self._dwell = 0
+        self._lift_target: np.ndarray | None = None
+        self._home: np.ndarray | None = None
+
+    @property
+    def done(self) -> bool:
+        return self.state >= len(self._STATE_NAMES)
+
+    def state_name(self, state: int | None = None) -> str:
+        index = self.state if state is None else state
+        return self._STATE_NAMES[index] if index < len(self._STATE_NAMES) else "done"
+
+    def target(self) -> tuple[np.ndarray, np.ndarray, float]:
+        env = self._env
+        gl = self._GRIPPER_LENGTH
+        if self.state == 0:
+            if self._home is None:
+                self._home = env.data.xpos[self._wrist_bid].copy()
+            return self._home + (0.0, 0.0, self._HOVER_Z), self._DOWN_QUAT, -1.0
+        if self.state == 5:
+            if self._lift_target is None:
+                self._lift_target = env.data.xpos[env._block_body_id] + (0.0, 0.0, 0.08 + gl)
+            return self._lift_target, self._DOWN_QUAT, 1.0
+        ref, dz, grip = self._TARGETS[self.state]
+        base = env.data.xpos[env._block_body_id if ref == "block" else env._target_box_body_id]
+        return base + (0.0, 0.0, dz + gl), self._DOWN_QUAT, grip
+
+    def _orient_error(self) -> float:
+        quat = self._env.data.xquat[self._wrist_bid]
+        dot = float(np.clip(abs(np.dot(quat, self._DOWN_QUAT)), 0.0, 1.0))
+        return 2.0 * np.arccos(dot)
+
+    def _grasped(self) -> bool:
+        env = self._env
+        contacted: set[int] = set()
+        for contact in env.data.contact[: env.data.ncon]:
+            if contact.geom1 == self._block_geom and contact.geom2 in self._finger_geoms:
+                contacted.add(contact.geom2)
+            elif contact.geom2 == self._block_geom and contact.geom1 in self._finger_geoms:
+                contacted.add(contact.geom1)
+        return contacted == self._finger_geoms
+
+    def advance(self) -> None:
+        if self.done:
+            return
+        env = self._env
+        target, _quat, gripper = self.target()
+        wrist = env.data.xpos[self._wrist_bid]
+        pos_ok = float(np.linalg.norm(target - wrist)) < self._POS_TOL
+        gripper_pos = float(env.data.qpos[env._gripper_qpos_adr])
+        gripper_ok = abs(gripper_pos - (0.9 if gripper > 0 else 0.0)) < 0.08
+        orient_ok = self._orient_error() < self._ORIENT_TOL
+
+        reached = pos_ok and orient_ok
+        if self.state == 3:
+            reached = reached and self._grasped() and gripper_pos > 0.2
+        elif self.state != 0:
+            reached = reached and gripper_ok
+
+        self._settled = self._settled + 1 if reached else 0
+
+        if self.state == 3 and self._settled >= 3:
+            self._transition(4)
+            self._dwell = 8
+        elif self.state == 4:
+            self._dwell -= 1
+            if self._dwell <= 0:
+                self._transition(5)
+        elif self.state == 8:
+            if reached:
+                self._dwell -= 1
+            if self._dwell <= 0:
+                self._transition(9)
+        elif self._settled >= 3:
+            self._transition(self.state + 1)
+            if self.state == 8:
+                self._dwell = 8
+
+    def _transition(self, next_state: int) -> None:
+        env = self._env
+        print(
+            f"[状态机] {self.state}:{self.state_name()} -> "
+            f"{next_state}:{self.state_name(next_state)} "
+            f"wrist_z={env.data.xpos[self._wrist_bid][2]:.3f} "
+            f"cube_z={env.data.xpos[env._block_body_id][2]:.3f}"
+        )
+        self.state = next_state
+        self._settled = 0
 
 
 class _SdkRightArmIK:
-    """使用 Taks SDK 的 T1DualArmIK，将末端目标转换为右臂关节目标。"""
-
     _JOINTS = (
         "right_shoulder_pitch_joint",
         "right_shoulder_roll_joint",
@@ -186,7 +178,7 @@ class _SdkRightArmIK:
         "right_wrist_pitch_joint",
     )
 
-    _IK_STEPS_PER_CONTROL = 4
+    _STEPS = 10
 
     def __init__(self, sdk_path: Path) -> None:
         sdk_path = sdk_path.expanduser().resolve()
@@ -195,12 +187,13 @@ class _SdkRightArmIK:
         from taks.ik import T1DualArmIK
 
         self._solver = T1DualArmIK()
+        self._solver.dt = 0.05
         self._qpos_ids = np.array(
             [self._solver.model.jnt_qposadr[self._solver.model.joint(n).id] for n in self._JOINTS],
             dtype=np.intp,
         )
 
-    def reset_from_env(self, env: SemiTaksT1PickCubeEnv) -> None:
+    def reset_from_env(self, env: Any) -> None:
         for joint_id in range(env.model.njnt):
             name = env.model.joint(joint_id).name
             solver_id = mujoco.mj_name2id(
@@ -220,65 +213,36 @@ class _SdkRightArmIK:
         self._solver.data.mocap_pos[mid] = env.data.xpos[wrist_bid]
         self._solver.data.mocap_quat[mid] = env.data.xquat[wrist_bid]
 
-    def solve(
-        self,
-        position: np.ndarray,
-        quaternion: np.ndarray,
-    ) -> np.ndarray:
+    def solve(self, position: np.ndarray, quaternion: np.ndarray) -> np.ndarray:
         position = np.asarray(position, dtype=np.float64)
         quaternion = np.asarray(quaternion, dtype=np.float64)
-        for _ in range(self._IK_STEPS_PER_CONTROL):
+        for _ in range(self._STEPS):
             self._solver.step(right_pos=position, right_quat=quaternion)
         return self._solver.data.qpos[self._qpos_ids].copy()
 
 
 def _apply_sdk_joint_target(
-    env: SemiTaksT1PickCubeEnv,
-    joint_target: np.ndarray,
-    gripper: float,
+    env: Any, joint_target: np.ndarray, gripper: float
 ) -> np.ndarray:
+    env.data.qpos[env._arm_qpos_adr] = joint_target
+    env.data.qvel[env._arm_dof_adr] = 0.0
     env.data.ctrl[env._arm_actuator_ids] = joint_target
     env.data.ctrl[env._gripper_actuator_id] = 0.9 if gripper > 0 else 0.0
     for _ in range(env.control_substeps):
-        env.data.ctrl[env._arm_actuator_ids] = joint_target
         mujoco.mj_step(env.model, env.data)
     return np.r_[joint_target, gripper].astype(np.float32)
 
 
-_MOCAP_CACHE: dict[int, int] = {}
-
-
-def _update_mocap_target_marker(
-    env: SemiTaksT1PickCubeEnv,
-    target_position: np.ndarray | None,
-    target_quaternion: np.ndarray | None = None,
-) -> None:
-    if target_position is None:
-        return
-    mocap_slot = _MOCAP_CACHE.get(id(env.model))
-    if mocap_slot is None:
-        mocap_id = mujoco.mj_name2id(
-            env.model, mujoco.mjtObj.mjOBJ_BODY, "right_hand_target"
+def _light_observation(env: Any) -> dict[str, Any]:
+    states = np.concatenate(
+        (
+            env.data.site_xpos[env._ee_site_id].astype(np.float32),
+            env.data.xpos[env._block_body_id].astype(np.float32),
+            np.array([env.data.qpos[env._gripper_qpos_adr] / 0.9], dtype=np.float32),
         )
-        if mocap_id < 0:
-            _MOCAP_CACHE[id(env.model)] = -1
-            return
-        mocap_slot = int(env.model.body_mocapid[mocap_id])
-        _MOCAP_CACHE[id(env.model)] = mocap_slot
-    if mocap_slot >= 0:
-        env.data.mocap_pos[mocap_slot] = np.asarray(target_position, dtype=np.float64)
-        if target_quaternion is not None:
-            env.data.mocap_quat[mocap_slot] = np.asarray(target_quaternion, dtype=np.float64)
-
-
-def _light_observation(env: SemiTaksT1PickCubeEnv) -> dict[str, Any]:
-    ee_pos = env.data.site_xpos[env._ee_site_id].astype(np.float32).copy()
-    block_pos = env.data.xpos[env._block_body_id].astype(np.float32).copy()
-    gripper = np.array(
-        [env.data.qpos[env._gripper_qpos_adr] / 0.9], dtype=np.float32
     )
     return {
-        "states": np.concatenate((ee_pos, block_pos, gripper)),
+        "states": states,
         "images": {
             "left_eye": env._render_camera("left_eye_camera"),
             "wrist": env._render_camera("right_wrist_camera"),
@@ -287,7 +251,7 @@ def _light_observation(env: SemiTaksT1PickCubeEnv) -> dict[str, Any]:
 
 
 class _VRHandReference:
-    def __init__(self, env: SemiTaksT1PickCubeEnv, body_id: int) -> None:
+    def __init__(self, env: Any, body_id: int) -> None:
         self._env = env
         self._body_id = body_id
 
@@ -299,16 +263,14 @@ class _VRHandReference:
 
 
 class _VRRobotReference:
-    def __init__(self, env: SemiTaksT1PickCubeEnv) -> None:
-        left_body_id = env.model.body("left_wrist_pitch_link").id
-        right_body_id = env.model.body("right_wrist_pitch_link").id
-        self.left_hand = _VRHandReference(env, left_body_id)
-        self.right_hand = _VRHandReference(env, right_body_id)
-        shoulder_id = env.model.joint("right_shoulder_pitch_joint").id
-        elbow_id = env.model.joint("right_elbow_joint").id
-        shoulder = env.data.xanchor[shoulder_id]
-        elbow = env.data.xanchor[elbow_id]
-        hand = env.data.xpos[right_body_id]
+    def __init__(self, env: Any) -> None:
+        left_id = env.model.body("left_wrist_pitch_link").id
+        right_id = env.model.body("right_wrist_pitch_link").id
+        self.left_hand = _VRHandReference(env, left_id)
+        self.right_hand = _VRHandReference(env, right_id)
+        shoulder = env.data.xanchor[env.model.joint("right_shoulder_pitch_joint").id]
+        elbow = env.data.xanchor[env.model.joint("right_elbow_joint").id]
+        hand = env.data.xpos[right_id]
         self.arm_length = float(
             np.linalg.norm(elbow - shoulder) + np.linalg.norm(hand - elbow)
         )
@@ -317,7 +279,7 @@ class _VRRobotReference:
 class _VRActionSource:
     def __init__(
         self,
-        env: SemiTaksT1PickCubeEnv,
+        env: Any,
         sdk_path: Path,
         ip: str,
         port: int,
@@ -363,7 +325,10 @@ class _VRActionSource:
         targets = self._controller.step()
         if not targets:
             return None, None, self._last_gripper_action
-        quaternion = np.asarray(targets.get("right_quat", self._robot.right_hand.mocap_quat()), dtype=np.float64)
+        quaternion = np.asarray(
+            targets.get("right_quat", self._robot.right_hand.mocap_quat()),
+            dtype=np.float64,
+        )
         if quaternion.shape == (3, 3):
             converted = np.empty(4, dtype=np.float64)
             mujoco.mju_mat2Quat(converted, quaternion)
@@ -377,16 +342,16 @@ class _VRActionSource:
 
 def main() -> None:
     from rlinf.data.storage.lerobot.writer import LeRobotDatasetWriter
-    from rlinf.envs.frankasim.semi_taks_t1_pickcube_env import (
-        SemiTaksT1PickCubeEnv,
-    )
+    from rlinf.envs.frankasim.semi_taks_t1_pickcube_env import SemiTaksT1PickCubeEnv
 
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description="采集 Semi-Taks-T1 将 cube 放入桌面目标框的 LeRobot 数据。"
+    )
     parser.add_argument("--repo-id", default="semi_taks_t1_put_cube")
     parser.add_argument("--num-episodes", type=int, default=100)
     parser.add_argument("--max-attempts", type=int, default=1000)
-    parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--max-steps", type=int, default=100)
+    parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--fps", type=int, default=10)
     parser.add_argument(
         "--control-mode",
@@ -408,42 +373,19 @@ def main() -> None:
         default=1.75,
         help="操作者身高（米），用于自动缩放手柄位移",
     )
-    parser.add_argument(
-        "--vr-pos-scale",
-        type=float,
-        default=None,
-        help="覆盖自动计算的 VR 位移缩放系数",
-    )
-    parser.add_argument(
-        "--vr-gripper-threshold",
-        type=float,
-        default=0.5,
-        help="右手柄夹爪值切换开合的阈值",
-    )
-    parser.add_argument(
-        "--viewer",
-        action="store_true",
-        help="打开 MuJoCo 可视化窗口",
-    )
+    parser.add_argument("--viewer", action="store_true", help="打开 MuJoCo 可视化窗口")
     args = parser.parse_args()
-    if args.fps <= 0:
-        parser.error("--fps 必须大于 0")
-    if args.control_mode == "vr" and not 0.0 <= args.vr_gripper_threshold <= 1.0:
-        parser.error("--vr-gripper-threshold 必须在 [0, 1] 内")
     if not args.viewer:
         os.environ.setdefault("MUJOCO_GL", "egl")
 
     env = SemiTaksT1PickCubeEnv(image_obs=True, control_substeps=20)
-    viewer = None
+    viewer = mujoco.viewer.launch_passive(env.model, env.data) if args.viewer else None
     vr_source = None
     sdk_ik = None
     writer = None
     writer_created = False
-    step_period = 1.0 / args.fps
     successes = 0
     try:
-        if args.viewer:
-            viewer = mujoco.viewer.launch_passive(env.model, env.data)
         if args.control_mode == "vr":
             vr_source = _VRActionSource(
                 env=env,
@@ -451,8 +393,8 @@ def main() -> None:
                 ip=args.vr_ip,
                 port=args.vr_port,
                 operator_height=args.operator_height,
-                pos_scale=args.vr_pos_scale,
-                gripper_threshold=args.vr_gripper_threshold,
+                pos_scale=_VR_POS_SCALE,
+                gripper_threshold=_VR_GRIPPER_THRESHOLD,
             )
             vr_source.start()
         sdk_ik = _SdkRightArmIK(args.taks_sdk_path)
@@ -473,54 +415,56 @@ def main() -> None:
             action_dim=4,
         )
         writer_created = True
-        stop_requested = False
+
         wrist_bid = env.model.body("right_wrist_pitch_link").id
+        mocap_slot = int(env.model.body_mocapid[env.model.body("right_hand_target").id])
+        stop_requested = False
         for attempt in range(args.max_attempts):
             if successes >= args.num_episodes or stop_requested:
                 break
             env.reset(seed=args.seed + attempt)
             obs = _light_observation(env)
-            state_machine = _PickPlaceStateMachine()
-            sdk_ik.reset_from_env(env)
-            _update_mocap_target_marker(
-                env, env.data.xpos[wrist_bid], env.data.xquat[wrist_bid]
-            )
+            state_machine = _PickPlaceStateMachine(env)
+            env.data.mocap_pos[mocap_slot] = env.data.xpos[wrist_bid]
+            env.data.mocap_quat[mocap_slot] = env.data.xquat[wrist_bid]
             if vr_source is None:
-                print(
-                    f"[状态机] 回合 {attempt + 1}，"
-                    f"进入 0:{state_machine.state_name()}"
-                )
-            if vr_source is not None:
+                print(f"[状态机] 回合 {attempt + 1}，进入 0:{state_machine.state_name()}")
+            else:
                 vr_source.reset()
             frames = []
-            for step in range(args.max_steps):
-                loop_start = time.monotonic()
+            for _step in range(args.max_steps):
                 wrist_pos = env.data.xpos[wrist_bid]
                 if vr_source is not None:
                     target, quaternion, gripper = vr_source.target_pose()
-                    _update_mocap_target_marker(env, target, quaternion)
                     if target is None:
                         joint_target = env.data.qpos[env._arm_qpos_adr].copy()
                         gripper = -1.0
+                        action = np.r_[np.zeros(3), gripper].astype(np.float32)
                     else:
                         joint_target = sdk_ik.solve(target, quaternion)
-                    action = np.r_[np.clip((target - wrist_pos) / 0.025, -1.0, 1.0) if target is not None else np.zeros(3), gripper].astype(np.float32)
+                        action = np.r_[
+                            np.clip((target - wrist_pos) / 0.025, -1.0, 1.0), gripper
+                        ].astype(np.float32)
+                        env.data.mocap_pos[mocap_slot] = target
+                        env.data.mocap_quat[mocap_slot] = quaternion
                 else:
-                    target, gripper = state_machine.target(env)
-                    quaternion = env.data.xquat[wrist_bid].copy()
-                    _update_mocap_target_marker(env, target, quaternion)
+                    target, quaternion, gripper = state_machine.target()
+                    env.data.mocap_pos[mocap_slot] = target
+                    env.data.mocap_quat[mocap_slot] = quaternion
                     joint_target = sdk_ik.solve(target, quaternion)
-                    action = np.r_[np.clip((target - wrist_pos) / 0.025, -1.0, 1.0), gripper].astype(np.float32)
+                    action = np.r_[
+                        np.clip((target - wrist_pos) / 0.025, -1.0, 1.0), gripper
+                    ].astype(np.float32)
                 _apply_sdk_joint_target(env, joint_target, gripper)
                 info = env._info()
-                next_obs, terminated, truncated = _light_observation(env), bool(info["success"]), False
+                next_obs = _light_observation(env)
                 if vr_source is None:
-                    state_machine.advance(env)
+                    state_machine.advance()
                 frames.append(
                     {
                         "image": obs["images"]["left_eye"],
                         "wrist_image": obs["images"]["wrist"],
-                        "state": obs["states"].astype(np.float32),
+                        "state": obs["states"],
                         "actions": action,
                         "task": "Put the cube into the blue box.",
                         "is_success": np.asarray([bool(info["success"])], dtype=bool),
@@ -532,9 +476,7 @@ def main() -> None:
                         stop_requested = True
                         break
                     viewer.sync()
-                if terminated or truncated:
-                    break
-                if vr_source is None and state_machine.done:
+                if bool(info["success"]) or (vr_source is None and state_machine.done):
                     break
             if frames and bool(info["success"]):
                 writer.add_episode(frames)
